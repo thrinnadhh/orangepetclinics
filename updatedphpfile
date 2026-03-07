@@ -1,352 +1,390 @@
 <?php
 /**
- * Plugin Name: Orange Pet Clinic - Admin Panel (V5)
- * Description: Fully decoupled Admin Dashboard for Calendar Blocks, WooCommerce Inventory, Dynamic Pricing, and Reschedules.
- * Version: 5.0
+ * Plugin Name: Orange Pet Clinic - Admin Panel (V6.5)
+ * Description: Fully decoupled Admin Dashboard for Dual-Calendars, Calendar Blocking & Unblocking, Bulk WooCommerce Inventory Manager, Dynamic Services Pricing, Detailed Appointments, Data Flushing, and Customer My Account Services Tab.
+ * Version: 6.5
  */
+
 // Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
 }
+
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
-// ─────────────────────────────────────────────────────────────
-// 0. DEFAULT PRICING STRUCTURE
-// ─────────────────────────────────────────────────────────────
-function opc_v5_get_default_prices()
-{
+
+// 1. Check if WooCommerce is active
+$wc_active = in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')));
+
+// 2. Default Service Prices
+function opc_v5_get_default_prices() {
     return array(
         'doctors' => array(
-            "Dr. Malli babu" => 500,
-            "Dr. Jane Smith" => 800,
-            "Dr. Alan Walker" => 600
+            'Dr. Malli babu' => 500,
+            'Dr. Jane Smith' => 800,
+            'Dr. Alan Walker' => 600
         ),
         'grooming' => array(
-            "Normal Bathing" => array("Small" => 600, "Medium" => 700, "Large" => 800, "Puppy" => 400),
-            "Medicated Bathing" => array("Small" => 700, "Medium" => 800, "Large" => 900, "Puppy" => 500),
-            "Tick Bathing" => array("Small" => 800, "Medium" => 900, "Large" => 1000, "Puppy" => null), // null for puppy not available
-            "Grooming Bathing" => array("Small" => 2000, "Medium" => 2000, "Large" => 2600, "Puppy" => 1700),
-            "Private Hair Cut" => array("Small" => 250, "Medium" => 350, "Large" => 400, "Puppy" => 200),
-            "Zero Hair Cut" => array("Small" => 1400, "Medium" => 1400, "Large" => 2000, "Puppy" => 1000)
+            'Normal Bathing' => array('Small' => 500, 'Medium' => 700, 'Large' => 1000, 'Puppy' => 300),
+            'Medicated Bathing' => array('Small' => 600, 'Medium' => 800, 'Large' => 1200, 'Puppy' => 400),
+            'Tick Bathing' => array('Small' => 700, 'Medium' => 900, 'Large' => 1500, 'Puppy' => null),
+            'Grooming Bathing' => array('Small' => 1200, 'Medium' => 1500, 'Large' => 2000, 'Puppy' => 800),
+            'Private Hair Cut' => array('Small' => 200, 'Medium' => 300, 'Large' => 500, 'Puppy' => 200),
+            'Zero Hair Cut' => array('Small' => 500, 'Medium' => 700, 'Large' => 1000, 'Puppy' => 400)
         )
     );
 }
-function opc_v5_get_current_prices()
-{
-    $prices = get_option('opc_service_prices', opc_v5_get_default_prices());
-    // Quick migration for renamed doctor
-    if (isset($prices['doctors']['Dr. John Doe'])) {
-        $prices['doctors']['Dr. Malli babu'] = $prices['doctors']['Dr. John Doe'];
-        unset($prices['doctors']['Dr. John Doe']);
-        update_option('opc_service_prices', $prices);
+
+// 3. Get Current Prices
+function opc_v5_get_current_prices() {
+    $saved = get_option('opc_service_prices');
+    if (!$saved || empty($saved)) {
+        return opc_v5_get_default_prices();
     }
-    return $prices;
+    return $saved;
 }
-// ─────────────────────────────────────────────────────────────
-// 1. FRONTEND AJAX ENDPOINTS (Completely Renamed)
-// ─────────────────────────────────────────────────────────────
-// Send Prices to Frontend
-add_action('wp_ajax_get_service_prices', 'opc_v5_get_service_prices');
-add_action('wp_ajax_nopriv_get_service_prices', 'opc_v5_get_service_prices');
-function opc_v5_get_service_prices()
-{
-    $prices = opc_v5_get_current_prices();
-    wp_send_json_success($prices);
-    wp_die();
-}
-add_action('wp_ajax_pet_booking', 'opc_v5_custom_booking_handler');
-add_action('wp_ajax_nopriv_pet_booking', 'opc_v5_custom_booking_handler');
-function opc_v5_custom_booking_handler()
-{
-    try {
-        $data = json_decode(file_get_contents("php://input"), true);
-        if (!$data)
-            throw new Exception('No data received');
-        $admin = "orangepetclinics@gmail.com";
-        $user = sanitize_email($data['email'] ?? '');
-        $phone = sanitize_text_field($data['phone'] ?? '');
-        $type = sanitize_text_field($data['type'] ?? '');
-        $category = sanitize_text_field($data['category'] ?? '');
-        $breed = sanitize_text_field($data['breed'] ?? '');
-        $doctor = sanitize_text_field($data['doctor'] ?? '');
-        if (empty($user) || empty($phone)) {
-            wp_send_json_error('Missing email or phone');
-            return;
-        }
-        // Email template
-        $subject = "New Appointment Booking";
-        $name = sanitize_text_field($data['name'] ?? '');
-        $date = sanitize_text_field($data['date'] ?? '');
-        $time = sanitize_text_field($data['time'] ?? '');
-        $message = '
-        <div style="background:#f5f7fb;padding:30px;font-family:Arial,sans-serif">
-          <div style="max-width:600px;margin:auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:8px">
-            <div style="background:#ff7a00;padding:20px;text-align:center;color:#ffffff;font-size:22px;font-weight:bold">Orange Pet Clinic</div>
-            <div style="padding:25px">
-              <h3>New Appointment Booking</h3>
-              <p><strong>Name:</strong> ' . esc_html($name) . '</p>
-              <p><strong>Phone:</strong> ' . esc_html($phone) . '</p>
-              <p><strong>Date:</strong> ' . esc_html($date) . '</p>
-              <p><strong>Time:</strong> ' . esc_html($time) . '</p>
-            </div>
-          </div>
-        </div>';
-        $headers = array('Content-Type: text/html; charset=UTF-8');
-        wp_mail($admin, $subject, $message, $headers);
-        wp_mail($user, "Appointment Confirmed", $message, $headers);
-        // Save booking
-        if (!empty($date) && !empty($time) && !empty($phone)) {
-            $booked_option_key = ($type === 'doctor') ? 'opc_booked_slots_doctor' : 'opc_booked_slots_grooming';
-            $slots = get_option($booked_option_key, array());
-            if (!isset($slots[$date]))
-                $slots[$date] = array();
-            if (!in_array($time, $slots[$date])) {
-                $slots[$date][] = $time;
-                update_option($booked_option_key, $slots);
-            }
-            $bookings = get_option('opc_all_bookings', array());
-            $booking_data = array(
-                'id' => uniqid('bkg_'), 
-                'date' => $date, 
-                'time' => $time, 
-                'phone' => $phone, 
-                'email' => $user,
-                'status' => 'active',
-                'name' => $name,
-                'type' => $type,
-                'category' => $category,
-                'breed' => $breed,
-                'doctor' => $doctor
-            );
-            $bookings[$phone] = $booking_data;
-            update_option('opc_all_bookings', $bookings);
-            // Save to permanent history for the user's dashboard
-            $history = get_option('opc_booking_history', array());
-            $booking_data['timestamp'] = current_time('timestamp');
-            $history[] = $booking_data;
-            update_option('opc_booking_history', $history);
-        }
-        wp_send_json_success("Booking saved!");
-    } catch (Exception $e) {
-        wp_send_json_error($e->getMessage());
-    }
-}
-add_action('wp_ajax_get_booked_slots', 'opc_v5_get_booked_slots_renamed');
-add_action('wp_ajax_nopriv_get_booked_slots', 'opc_v5_get_booked_slots_renamed');
-function opc_v5_get_booked_slots_renamed()
-{
-    $date = isset($_POST['date']) ? sanitize_text_field($_POST['date']) : '';
-    $type = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : 'grooming';
-    if (empty($date))
-        wp_send_json_error('No date provided');
-    $booked_option_key = ($type === 'doctor') ? 'opc_booked_slots_doctor' : 'opc_booked_slots_grooming';
-    $all_booked_slots = get_option($booked_option_key, array());
-    // Also include blocks that apply to BOTH (the old opc_booked_slots which we keep for full-day legacy blocks, or just merge them)
-    $legacy_booked_slots = get_option('opc_booked_slots', array());
-    $booked_times = array_merge(
-        $all_booked_slots[$date] ?? array(),
-        $legacy_booked_slots[$date] ?? array()
+
+// 4. Register Admin Menu
+add_action('admin_menu', 'opc_v5_register_admin_page');
+function opc_v5_register_admin_page() {
+    add_menu_page(
+        'Orange Pet Clinic',
+        'Orange Pet Admin',
+        'manage_options',
+        'orange-pet-admin',
+        'opc_v5_render_admin_dashboard_safe',
+        'dashicons-pets',
+        2
     );
-    if (in_array("ALL_DAY", $booked_times)) {
-        wp_send_json_success(array("10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM"));
-    } else {
-        wp_send_json_success($booked_times);
-    }
-    wp_die();
 }
-add_action('wp_ajax_fetch_booking_by_phone', 'opc_v5_fetch_booking_renamed');
-add_action('wp_ajax_nopriv_fetch_booking_by_phone', 'opc_v5_fetch_booking_renamed');
-function opc_v5_fetch_booking_renamed()
-{
-    $phone = isset($_POST['phone']) ? sanitize_text_field($_POST['phone']) : '';
+
+// 5. Shortcode for Booking Form
+add_shortcode('orange_pet_booking', 'opc_v5_render_booking_form');
+function opc_v5_render_booking_form() {
+    ob_start();
+    $file_path = plugin_dir_path(__FILE__) . 'booking-form.html';
+    if (file_exists($file_path)) {
+        include $file_path;
+    } else {
+        echo "<p style='color:red;'>Error: booking-form.html not found.</p>";
+    }
+    return ob_get_clean();
+}
+
+// 6. Ajax: Get Service Prices (Frontend)
+add_action('wp_ajax_get_service_prices', 'opc_v5_ajax_get_prices');
+add_action('wp_ajax_nopriv_get_service_prices', 'opc_v5_ajax_get_prices');
+function opc_v5_ajax_get_prices() {
+    wp_send_json_success(opc_v5_get_current_prices());
+}
+
+// 7. Ajax: Handle New Booking
+add_action('wp_ajax_pet_booking', 'opc_v5_handle_booking');
+add_action('wp_ajax_nopriv_pet_booking', 'opc_v5_handle_booking');
+function opc_v5_handle_booking() {
+    $raw_data = file_get_contents("php://input");
+    $data = json_decode($raw_data, true);
+
+    if (!$data) {
+        wp_send_json_error("Invalid data received.");
+    }
+
+    $name = sanitize_text_field($data['name']);
+    $email = sanitize_email($data['email']);
+    $phone = sanitize_text_field($data['phone']);
+    $type = sanitize_text_field($data['type'] ?? 'grooming'); // doctor or grooming
+    $date = sanitize_text_field($data['date']);
+    $time = sanitize_text_field($data['time']);
+
+    $amount = floatval($data['amount']);
+
+    if (empty($name) || empty($phone) || empty($date) || empty($time)) {
+        wp_send_json_error("Missing required fields.");
+    }
+
+    // Determine lock key based on type
+    $booked_option_key = ($type === 'doctor') ? 'opc_booked_slots_doctor' : 'opc_booked_slots_grooming';
+    $slots = get_option($booked_option_key, array());
+
+    if (!isset($slots[$date])) {
+        $slots[$date] = array();
+    }
+
+    if (in_array($time, $slots[$date])) {
+        wp_send_json_error("Slot already booked. Please refresh and try again.");
+    }
+
+    // Lock the slot
+    $slots[$date][] = $time;
+    update_option($booked_option_key, $slots);
+
+    // Save Booking Data (Legacy format + new History format)
+    $booking_id = uniqid('bkg_');
+    $b_data = array(
+        'id' => $booking_id,
+        'name' => $name,
+        'email' => $email,
+        'phone' => $phone,
+        'type' => $type,
+        'date' => $date,
+        'time' => $time,
+        'amount' => $amount,
+        'status' => 'active',
+        'timestamp' => current_time('mysql')
+    );
+
+    if ($type === 'doctor') {
+        $b_data['doctor'] = sanitize_text_field($data['doctor']);
+    } else {
+        $b_data['category'] = sanitize_text_field($data['category']);
+        $b_data['breed'] = sanitize_text_field($data['breed']);
+    }
+
+    // A) LEGACY: Overwrite active booking per phone
+    $bookings = get_option('opc_all_bookings', array());
+    $bookings[$phone] = $b_data;
+    update_option('opc_all_bookings', $bookings);
+
+    // B) NEW HISTORY: Append to complete log
+    $history = get_option('opc_booking_history', array());
+    $history[] = $b_data;
+    update_option('opc_booking_history', $history);
+
+    wp_send_json_success("Booking Saved");
+}
+
+// 8. Ajax: Fetch Available Slots
+add_action('wp_ajax_get_booked_slots', 'opc_v5_get_booked_slots');
+add_action('wp_ajax_nopriv_get_booked_slots', 'opc_v5_get_booked_slots');
+function opc_v5_get_booked_slots() {
+    $date = sanitize_text_field($_POST['date'] ?? '');
+    $type = sanitize_text_field($_POST['type'] ?? 'grooming'); // Request specifies doctor or grooming
+
+    if (!$date) {
+        wp_send_json_error("No date provided.");
+    }
+
+    $booked_option_key = ($type === 'doctor') ? 'opc_booked_slots_doctor' : 'opc_booked_slots_grooming';
+    $slots = get_option($booked_option_key, array());
+
+    $booked = isset($slots[$date]) ? $slots[$date] : array();
+    wp_send_json_success($booked);
+}
+
+// 9. Ajax: Fetch Booking by Phone for Reschedule
+add_action('wp_ajax_fetch_booking_by_phone', 'opc_v5_fetch_booking');
+add_action('wp_ajax_nopriv_fetch_booking_by_phone', 'opc_v5_fetch_booking');
+function opc_v5_fetch_booking() {
+    $phone = sanitize_text_field($_POST['phone'] ?? '');
+    if (!$phone) {
+        wp_send_json_error("Phone number is required.");
+        return;
+    }
+
     $all_bookings = get_option('opc_all_bookings', array());
-    if (isset($all_bookings[$phone])) {
+    
+    if (isset($all_bookings[$phone]) && ($all_bookings[$phone]['status'] ?? '') !== 'completed' && ($all_bookings[$phone]['status'] ?? '') !== 'cancelled') {
         wp_send_json_success($all_bookings[$phone]);
     } else {
-        wp_send_json_error('No booking found');
+        wp_send_json_error("No active appointment found for this number.");
     }
-    wp_die();
 }
-add_action('wp_ajax_reschedule_booking', 'opc_v5_reschedule_booking_renamed');
-add_action('wp_ajax_nopriv_reschedule_booking', 'opc_v5_reschedule_booking_renamed');
-function opc_v5_reschedule_booking_renamed()
-{
-    $data = json_decode(file_get_contents('php://input'), true);
-    $phone = sanitize_text_field($data['phone'] ?? '');
-    $new_date = sanitize_text_field($data['new_date'] ?? '');
-    $new_time = sanitize_text_field($data['new_time'] ?? '');
-    if (empty($phone) || empty($new_date) || empty($new_time)) {
-        wp_send_json_error('Missing data for rescheduling.');
-        wp_die();
+
+// 10. Ajax: Reschedule Booking
+add_action('wp_ajax_reschedule_booking', 'opc_v5_reschedule');
+add_action('wp_ajax_nopriv_reschedule_booking', 'opc_v5_reschedule');
+function opc_v5_reschedule() {
+    $raw_data = file_get_contents("php://input");
+    $data = json_decode($raw_data, true);
+
+    $phone = sanitize_text_field($data['phone']);
+    $new_date = sanitize_text_field($data['new_date']);
+    $new_time = sanitize_text_field($data['new_time']);
+
+    if (!$phone || !$new_date || !$new_time) {
+        echo wp_json_encode(['status' => 'error', 'data' => 'Missing data.']);
+        exit;
     }
+
     $all_bookings = get_option('opc_all_bookings', array());
-    if (!isset($all_bookings[$phone])) {
-        wp_send_json_error('Booking not found.');
-        wp_die();
+
+    if (!isset($all_bookings[$phone]) || ($all_bookings[$phone]['status'] ?? '') === 'completed' || ($all_bookings[$phone]['status'] ?? '') === 'cancelled') {
+        echo wp_json_encode(['status' => 'error', 'data' => 'Booking not found or already completed/cancelled.']);
+        exit;
     }
+
     $booking = $all_bookings[$phone];
-    $old_time_24 = date("H:i", strtotime($booking['time']));
-    $diff_hours = (strtotime("{$booking['date']} $old_time_24") - current_time('timestamp')) / 3600;
-    if ($diff_hours < 1.5) {
-        wp_send_json_error('Changes are not permitted within 1.5 hours of your appointment.');
-        wp_die();
-    }
-    $type = $booking['type'] ?? 'grooming';
+    $old_date = $booking['date'];
+    $old_time = $booking['time'];
+    $type = $booking['type'] ?? 'grooming'; 
+
     $booked_option_key = ($type === 'doctor') ? 'opc_booked_slots_doctor' : 'opc_booked_slots_grooming';
-    $all_booked_slots = get_option($booked_option_key, array());
-    if (isset($all_booked_slots[$booking['date']])) {
-        $all_booked_slots[$booking['date']] = array_diff($all_booked_slots[$booking['date']], [$booking['time']]);
+
+    // Free old slot
+    $slots = get_option($booked_option_key, array());
+    if (isset($slots[$old_date])) {
+        $slots[$old_date] = array_diff($slots[$old_date], [$old_time]);
+        $slots[$old_date] = array_values($slots[$old_date]);
+        update_option($booked_option_key, $slots);
     }
-    if (!isset($all_booked_slots[$new_date]))
-        $all_booked_slots[$new_date] = array();
-    $all_booked_slots[$new_date][] = $new_time;
-    update_option($booked_option_key, $all_booked_slots);
+
+    // Lock new slot
+    $slots = get_option($booked_option_key, array());
+    if (!isset($slots[$new_date])) $slots[$new_date] = array();
+    
+    if (in_array($new_time, $slots[$new_date])) {
+        echo wp_json_encode(['status' => 'error', 'data' => 'Timeslot already taken. Please refresh.']);
+        exit;
+    }
+
+    $slots[$new_date][] = $new_time;
+    update_option($booked_option_key, $slots);
+
+    // Update the booking record (legacy)
     $all_bookings[$phone]['date'] = $new_date;
     $all_bookings[$phone]['time'] = $new_time;
     $all_bookings[$phone]['status'] = 'rescheduled'; 
     update_option('opc_all_bookings', $all_bookings);
-    // Update in history as well
+
+    // Update in history log
     $history = get_option('opc_booking_history', array());
     foreach ($history as $key => $h) {
-        if (($h['phone'] ?? '') === $phone && ($h['status'] ?? '') !== 'rescheduled') {
+        if (($h['phone'] ?? '') === $phone && ($h['status'] ?? '') !== 'rescheduled' && ($h['status'] ?? '') !== 'completed' && ($h['status'] ?? '') !== 'cancelled') {
             $history[$key]['status'] = 'rescheduled';
             $history[$key]['date'] = $new_date;
             $history[$key]['time'] = $new_time;
         }
     }
     update_option('opc_booking_history', $history);
-    wp_send_json_success("Successfully rescheduled.");
-    wp_die();
+
+    echo wp_json_encode(['status' => 'success', 'data' => 'Rescheduled successfully.']);
+    exit;
 }
-// ─────────────────────────────────────────────────────────────
-// 2. ADMIN DASHBOARD
-// ─────────────────────────────────────────────────────────────
-add_action('admin_menu', 'opc_v5_register_admin_page');
-function opc_v5_register_admin_page()
-{
-    add_menu_page(
-        'Orange Pet Admin',
-        'Orange Pet Admin',
-        'manage_options',
-        'opc-admin-dashboard',
-        'opc_v5_render_admin_dashboard_safe',
-        'dashicons-calendar-alt',
-        30
-    );
-}
-function opc_v5_render_admin_dashboard_safe()
-{
+
+// 11. Ajax: Update WooCommerce Inventory (Bulk Save)
+add_action('wp_ajax_update_wc_inventory_bulk', 'opc_v5_update_wc_inventory_bulk');
+function opc_v5_update_wc_inventory_bulk() {
     if (!current_user_can('manage_options')) {
-        wp_die('No access');
+        wp_send_json_error(array('message' => 'Unauthorized'));
     }
+
+    $raw_data = file_get_contents("php://input");
+    $data = json_decode($raw_data, true);
+
+    if (empty($data['changes']) || !is_array($data['changes'])) {
+        wp_send_json_error(array('message' => 'No changes received.'));
+        return;
+    }
+
+    $updated_count = 0;
+
+    foreach ($data['changes'] as $change) {
+        $product_id = intval($change['id']);
+        $product = wc_get_product($product_id);
+    
+        if ($product) {
+            if (isset($change['price'])) {
+                $product->set_regular_price(sanitize_text_field($change['price']));
+            }
+            if (isset($change['stock'])) {
+                $stock_val = sanitize_text_field($change['stock']);
+                if ($stock_val === '' || $stock_val === null) {
+                    $product->set_manage_stock(false);
+                    $product->set_stock_status('instock');
+                } else {
+                    $product->set_manage_stock(true);
+                    $product->set_stock_quantity(intval($stock_val));
+                    $product->set_stock_status(intval($stock_val) > 0 ? 'instock' : 'outofstock');
+                }
+            }
+            $product->save();
+            $updated_count++;
+        }
+    }
+
+    wp_send_json_success(array('message' => "Successfully updated $updated_count products!"));
+}
+
+// 12. Render Admin Dashboard
+function opc_v5_render_admin_dashboard_safe() {
+    global $wc_active;
     $message = '';
-    $wc_active = class_exists('WooCommerce');
-    $wc_products = array();
+
     // Handle Calendar Block
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'block_calendar') {
-        if (!empty($_POST['block_date'])) {
-            $date = sanitize_text_field($_POST['block_date']);
-            $block_type = sanitize_text_field($_POST['block_type'] ?? 'both');
-            $keys = array();
-            if ($block_type === 'doctor' || $block_type === 'both')
-                $keys[] = 'opc_booked_slots_doctor';
-            if ($block_type === 'grooming' || $block_type === 'both')
-                $keys[] = 'opc_booked_slots_grooming';
-            foreach ($keys as $booked_option_key) {
-                $slots = get_option($booked_option_key, array());
-                if (!isset($slots[$date]))
-                    $slots[$date] = array();
-                if (!empty($_POST['block_all_day'])) {
-                    $slots[$date][] = "ALL_DAY";
-                } elseif (!empty($_POST['block_time'])) {
-                    $time = sanitize_text_field($_POST['block_time']);
-                    if (!in_array($time, $slots[$date])) {
-                        $slots[$date][] = $time;
-                    }
-                }
-                update_option($booked_option_key, $slots);
-            }
-            $message = '<div class="notice notice-success"><p>✅ Calendar blocked for ' . esc_html($date) . '!</p></div>';
+        $date = sanitize_text_field($_POST['block_date']);
+        $type = sanitize_text_field($_POST['block_type']);
+        $time = isset($_POST['block_time']) ? sanitize_text_field($_POST['block_time']) : '';
+        $all_day = isset($_POST['block_all_day']) ? true : false;
+        $times = array("10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM");
+
+        $slots_to_block = $all_day ? $times : array($time);
+        
+        $types_to_update = array();
+        if ($type === 'both') {
+            $types_to_update = array('opc_booked_slots_doctor', 'opc_booked_slots_grooming');
+        } elseif ($type === 'doctor') {
+            $types_to_update = array('opc_booked_slots_doctor');
+        } else {
+            $types_to_update = array('opc_booked_slots_grooming');
         }
+
+        foreach ($types_to_update as $option_key) {
+            $slots = get_option($option_key, array());
+            if (!isset($slots[$date])) $slots[$date] = array();
+            
+            foreach ($slots_to_block as $t) {
+                if (!in_array($t, $slots[$date])) {
+                    $slots[$date][] = $t;
+                }
+            }
+            update_option($option_key, $slots);
+        }
+
+        $message = '<div class="notice notice-success"><p>✅ Calendar successfully blocked!</p></div>';
     }
+
     // Handle Calendar Unblock
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'unblock_calendar') {
-        if (!empty($_POST['unblock_date'])) {
-            $date = sanitize_text_field($_POST['unblock_date']);
-            $block_type = sanitize_text_field($_POST['unblock_type'] ?? 'both');
-            $keys = array();
-            if ($block_type === 'doctor' || $block_type === 'both')
-                $keys[] = 'opc_booked_slots_doctor';
-            if ($block_type === 'grooming' || $block_type === 'both')
-                $keys[] = 'opc_booked_slots_grooming';
-            if ($block_type === 'both')
-                $keys[] = 'opc_booked_slots'; // legacy
-            $time_to_unblock = '';
-            if (!empty($_POST['unblock_all_day'])) {
-                $time_to_unblock = "ALL_DAY";
-            } elseif (!empty($_POST['unblock_time'])) {
-                $time_to_unblock = sanitize_text_field($_POST['unblock_time']);
-            }
-            if ($time_to_unblock !== '') {
-                foreach ($keys as $booked_option_key) {
-                    $slots = get_option($booked_option_key, array());
-                    if (isset($slots[$date])) {
-                        $slots[$date] = array_diff($slots[$date], [$time_to_unblock]);
-                        $slots[$date] = array_values($slots[$date]);
-                        if (empty($slots[$date])) {
-                            unset($slots[$date]);
-                        }
-                        update_option($booked_option_key, $slots);
-                    }
+        $date = sanitize_text_field($_POST['unblock_date']);
+        $type = sanitize_text_field($_POST['unblock_type']);
+        $time = isset($_POST['unblock_time']) ? sanitize_text_field($_POST['unblock_time']) : '';
+        $all_day = isset($_POST['unblock_all_day']) ? true : false;
+
+        $types_to_update = array();
+        if ($type === 'both') {
+            $types_to_update = array('opc_booked_slots_doctor', 'opc_booked_slots_grooming');
+        } elseif ($type === 'doctor') {
+            $types_to_update = array('opc_booked_slots_doctor');
+        } else {
+            $types_to_update = array('opc_booked_slots_grooming');
+        }
+
+        foreach ($types_to_update as $option_key) {
+            $slots = get_option($option_key, array());
+            if (isset($slots[$date])) {
+                if ($all_day) {
+                    unset($slots[$date]);
+                } else {
+                    $slots[$date] = array_diff($slots[$date], array($time));
+                    $slots[$date] = array_values($slots[$date]);
                 }
-                $message = '<div class="notice notice-success"><p>✅ Reverted calendar block for ' . esc_html($date) . '!</p></div>';
+                update_option($option_key, $slots);
             }
         }
+        $message = '<div class="notice notice-success"><p>✅ Calendar successfully freed up!</p></div>';
     }
-    // Handle Bulk Inventory Update (Save All)
-    if ($wc_active && $_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'update_inventory_bulk') {
-        if (isset($_POST['bulk_inventory']) && is_array($_POST['bulk_inventory'])) {
-            $update_count = 0;
-            foreach ($_POST['bulk_inventory'] as $pid => $data) {
-                $product = wc_get_product(intval($pid));
-                if ($product) {
-                    $changed = false;
-                    if (isset($data['qty']) && $data['qty'] !== '') {
-                        $qty = intval($data['qty']);
-                        $product->set_manage_stock(true);
-                        $product->set_stock_quantity($qty);
-                        $product->set_stock_status($qty > 0 ? 'instock' : 'outofstock');
-                        $changed = true;
-                    }
-                    if (isset($data['price']) && $data['price'] !== '') {
-                        $price = filter_var($data['price'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
-                        if ($price !== false) {
-                            $product->set_regular_price($price);
-                            $product->set_price($price);
-                            $changed = true;
-                        }
-                    }
-                    if ($changed) {
-                        $product->save();
-                        $update_count++;
-                    }
-                }
-            }
-            if ($update_count > 0) {
-                $message = '<div class="notice notice-success"><p>✅ Successfully updated ' . $update_count . ' products!</p></div>';
-            } else {
-                $message = '<div class="notice notice-info"><p>ℹ️ No products were changed.</p></div>';
-            }
-        }
-    }
+
     // Handle Admin Complete
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'admin_complete') {
         $phone = sanitize_text_field($_POST['complete_phone'] ?? '');
+
         if (!empty($phone)) {
             $all_bookings = get_option('opc_all_bookings', array());
             if (isset($all_bookings[$phone])) {
                 $all_bookings[$phone]['status'] = 'completed'; 
                 update_option('opc_all_bookings', $all_bookings);
+
                 // Update in history as well
                 $history = get_option('opc_booking_history', array());
                 foreach ($history as $key => $h) {
@@ -355,39 +393,51 @@ function opc_v5_render_admin_dashboard_safe()
                     }
                 }
                 update_option('opc_booking_history', $history);
+
                 $message = '<div class="notice notice-success"><p>✅ Successfully marked appointment for ' . esc_html($phone) . ' as Completed!</p></div>';
             }
         }
     }
+
     // Handle Admin Reschedule
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'admin_reschedule') {
         $phone = sanitize_text_field($_POST['resch_phone'] ?? '');
         $new_date = sanitize_text_field($_POST['resch_date'] ?? '');
         $new_time = sanitize_text_field($_POST['resch_time'] ?? '');
+
         if (!empty($phone) && !empty($new_date) && !empty($new_time)) {
             $all_bookings = get_option('opc_all_bookings', array());
+            
             if (isset($all_bookings[$phone])) {
-                $old_date = $all_bookings[$phone]['date'];
-                $old_time = $all_bookings[$phone]['time'];
-                $type = $all_bookings[$phone]['type'] ?? 'grooming';
+                $booking = $all_bookings[$phone];
+                $old_date = $booking['date'];
+                $old_time = $booking['time'];
+                $type = $booking['type'] ?? 'grooming';
+
                 $booked_option_key = ($type === 'doctor') ? 'opc_booked_slots_doctor' : 'opc_booked_slots_grooming';
-                // Remove old slot block
+
+                // Free old slot
                 $slots = get_option($booked_option_key, array());
                 if (isset($slots[$old_date])) {
                     $slots[$old_date] = array_diff($slots[$old_date], [$old_time]);
+                    $slots[$old_date] = array_values($slots[$old_date]);
+                    update_option($booked_option_key, $slots);
                 }
-                // Add new slot block
-                if (!isset($slots[$new_date]))
-                    $slots[$new_date] = array();
+
+                // Lock new slot
+                $slots = get_option($booked_option_key, array());
+                if (!isset($slots[$new_date])) $slots[$new_date] = array();
                 if (!in_array($new_time, $slots[$new_date])) {
                     $slots[$new_date][] = $new_time;
                 }
                 update_option($booked_option_key, $slots);
-                // Update array
+
+                // Update booking
                 $all_bookings[$phone]['date'] = $new_date;
                 $all_bookings[$phone]['time'] = $new_time;
-                $all_bookings[$phone]['status'] = 'rescheduled'; 
+                $all_bookings[$phone]['status'] = 'rescheduled';
                 update_option('opc_all_bookings', $all_bookings);
+
                 // Update in history as well
                 $history = get_option('opc_booking_history', array());
                 foreach ($history as $key => $h) {
@@ -398,19 +448,23 @@ function opc_v5_render_admin_dashboard_safe()
                     }
                 }
                 update_option('opc_booking_history', $history);
+
                 $message = '<div class="notice notice-success"><p>✅ Successfully rescheduled appointment for ' . esc_html($phone) . '!</p></div>';
             }
         }
     }
+
     // Handle Dynamic Pricing Update
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'update_pricing') {
         $prices = opc_v5_get_current_prices();
+
         if (isset($_POST['doctors'])) {
             foreach ($_POST['doctors'] as $key => $val) {
                 $real_key = base64_decode($key);
                 $prices['doctors'][$real_key] = intval($val);
             }
         }
+
         if (isset($_POST['grooming'])) {
             foreach ($_POST['grooming'] as $cat_key => $sizes) {
                 $real_cat = base64_decode($cat_key);
@@ -419,9 +473,11 @@ function opc_v5_render_admin_dashboard_safe()
                 }
             }
         }
+
         update_option('opc_service_prices', $prices);
         $message = '<div class="notice notice-success"><p>✅ Service prices updated successfully!</p></div>';
     }
+
     // Handle Flush Data
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'flush_bookings') {
         delete_option('opc_all_bookings');
@@ -431,6 +487,7 @@ function opc_v5_render_admin_dashboard_safe()
         delete_option('opc_booked_slots_grooming');
         $message = '<div class="notice notice-success" style="background:#fee; border-color:#fcc;"><p>🚨 All bookings and blocked calendar slots have been permanently deleted!</p></div>';
     }
+
     // Get WC Products Safely
     if ($wc_active) {
         try {
@@ -443,7 +500,9 @@ function opc_v5_render_admin_dashboard_safe()
             $wc_products = array();
         }
     }
+
     $times = array("10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM");
+
     $all_bookings = get_option('opc_all_bookings', array());
     $active_bookings = array(); $rescheduled_bookings = array(); $completed_bookings = array();
     if (!empty($all_bookings) && is_array($all_bookings)) {
@@ -455,16 +514,21 @@ function opc_v5_render_admin_dashboard_safe()
             else $active_bookings[$phone] = $b;
         }
     }
+
     $prices = opc_v5_get_current_prices();
     ?>
+
     <div class="wrap" style="max-width: 1200px; margin-top:20px;">
         <h1 style="font-size: 28px; margin-bottom: 20px; color:#ea580c; display:flex; align-items:center;">
             <span class="dashicons dashicons-pets"
                 style="font-size:32px; height:32px; width:32px; margin-right:8px;"></span>
             Orange Pet Clinic Command Center
         </h1>
+
         <?php echo $message; ?>
+
         <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+
             <!-- CALENDAR BLOCKER -->
             <div
                 style="flex:1; min-width:300px; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
@@ -504,6 +568,7 @@ function opc_v5_render_admin_dashboard_safe()
                         Slots</button>
                 </form>
             </div>
+
             <!-- CALENDAR UNBLOCKER -->
             <div
                 style="flex:1; min-width:300px; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
@@ -532,89 +597,114 @@ function opc_v5_render_admin_dashboard_safe()
                         <label>Or Specific Time:</label>
                         <select name="unblock_time" style="width:100%; padding:8px;">
                             <option value="">Choose time...</option>
-                            <?php foreach ($times as $t)
-                                echo "<option value='$t'>$t</option>"; ?>
+                            <?php
+                            foreach ($times as $t)
+                                echo "<option value='$t'>$t</option>";
+                            ?>
                         </select>
                     </p>
                     <button type="submit" class="button button-primary"
-                        style="width:100%; height:40px; background:#059669; border-color:#059669;">Remove Block</button>
+                        style="width:100%; height:40px; background:#059669; border-color:#059669;">Unblock
+                        Slots</button>
                 </form>
             </div>
-            <!-- INVENTORY MANAGER -->
-            <div style="flex:2; min-width:400px; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
-                    <h2 style="margin:0;">📦 Inventory Manager</h2>
-                    <input type="text" id="inventorySearch" placeholder="🔍 Search products..." style="padding:8px; width:220px; border:1px solid #ccc; border-radius:4px;" onkeydown="return event.key !== 'Enter';">
-                </div>
-                <?php if (!$wc_active): ?>
-                    <div style="padding:20px; background:#fee; border:1px solid #fcc; border-radius:4px;"><strong>❌ WooCommerce not active</strong><br>Please activate WooCommerce plugin first.</div>
-                <?php else: ?>
-                    <?php if (empty($wc_products)): ?>
-                        <div style="padding:20px; background:#fff3cd; border:1px solid #ffeaa7;"><strong>ℹ️ No products found</strong><br>Create some products in WooCommerce > Products.</div>
-                    <?php else: ?>
-                        <form method="POST" id="bulkInventoryForm">
-                            <input type="hidden" name="opc_action" value="update_inventory_bulk">
-                            
-                            <div style="max-height:400px; overflow:auto; border:1px solid #e5e5e5; border-radius:4px;">
-                                <table class="wp-list-table widefat striped" id="inventoryTable">
-                                    <thead style="position:sticky; top:0; background:#f0f0f1; z-index:10;">
-                                        <tr><th style="width:40%">Product</th><th style="width:30%">Stock Qty</th><th style="width:30%">Price (₹)</th></tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($wc_products as $product):
-                                            $pid = $product->get_id();
-                                            $stock = $product->get_stock_quantity() ?: 0;
-                                            $price = $product->get_regular_price() !== '' ? $product->get_regular_price() : $product->get_price();
-                                            ?>
-                                            <tr class="inv-row" data-name="<?php echo strtolower(esc_attr($product->get_name())); ?>" style="transition: background-color 0.2s;">
-                                                <td class="inv-name" style="vertical-align:middle;"><strong><?php echo esc_html($product->get_name()); ?></strong><br><span style="color:#666; font-size:11px;">Current: <?php echo $stock; ?> stock | ₹<?php echo esc_html($price); ?></span></td>
-                                                <td style="vertical-align:middle;">
-                                                    <input type="number" class="inv-field inv-qty" name="bulk_inventory[<?php echo $pid; ?>][qty]" value="<?php echo $stock; ?>" data-orig="<?php echo $stock; ?>" min="0" style="width:80px; padding:4px;">
-                                                </td>
-                                                <td style="vertical-align:middle;">
-                                                    <input type="number" step="0.01" class="inv-field inv-price" name="bulk_inventory[<?php echo $pid; ?>][price]" value="<?php echo esc_attr($price); ?>" data-orig="<?php echo esc_attr($price); ?>" min="0" style="width:90px; padding:4px;">
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div style="margin-top:15px; display:flex; justify-content:flex-end;">
-                                <button type="button" class="button button-primary" id="previewChangesBtn" style="background:#ea580c; border-color:#d04900; height:40px; font-weight:bold; font-size:14px; display:none; transition:opacity 0.2s;">Preview Changes & Save All</button>
-                            </div>
-                            <!-- PREVIEW MODAL -->
-                            <div id="previewModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:999999; justify-content:center; align-items:center;">
-                                <div style="background:white; padding:30px; border-radius:12px; width:550px; max-width:90%; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
-                                    <h2 style="margin-top:0; color:#1e293b; display:flex; align-items:center;"><span class="dashicons dashicons-visibility" style="margin-right:8px; color:#3b82f6;"></span> Review Your Changes</h2>
-                                    <p style="color:#64748b; font-size:13px;">Please verify the updates below before saving to the database.</p>
-                                    
-                                    <div id="previewContent" style="max-height:300px; overflow-y:auto; margin:20px 0; background:#f8fafc; border:1px solid #e2e8f0; padding:15px; border-radius:6px;">
-                                        <!-- Javascript injects preview list here -->
-                                    </div>
-                                    
-                                    <div style="display:flex; justify-content:flex-end; gap:12px;">
-                                        <button type="button" class="button" onclick="document.getElementById('previewModal').style.display='none';" style="height:38px;">Wait, Go Back</button>
-                                        <button type="button" id="confirmSaveBtn" class="button button-primary" style="background:#16a34a; border-color:#15803d; height:38px; display:flex; align-items:center;">
-                                            <span class="dashicons dashicons-yes-alt" style="margin-right:4px;"></span> Confirm & Save All
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </form>
+
+            <!-- WOOCOMMERCE INVENTORY MANAGER -->
+            <div style="flex:100%; min-width:100%; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-top:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom: 20px; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <h2>🛒 WooCommerce Inventory Quick-Edit</h2>
+                        <p style="color:#666; margin:0;">Edit shop prices and stock quantities exactly like an Excel sheet. Modified rows turn orange. Click "Review Changes" to save all at once.</p>
+                    </div>
+                    <?php if ($wc_active): ?>
+                    <div style="display:flex; gap:15px; align-items:center;">
+                        <input type="text" id="inventorySearch" placeholder="🔍 Search products..." style="padding: 10px; width: 250px; border-radius:4px; border:1px solid #ccc;">
+                        <button type="button" id="previewChangesBtn" class="button button-primary" style="height:40px; background:#ea580c; border-color:#ea580c; display:none; padding: 0 20px; font-weight:bold;">
+                            Review & Save Changes (<span id="changeCount">0</span>)
+                        </button>
+                    </div>
                     <?php endif; ?>
+                </div>
+
+                <?php if (!$wc_active): ?>
+                    <div style="padding:20px; background:#f8f9fa; border:1px solid #ddd; color:#d9534f; font-weight:bold;">
+                        WooCommerce plugin is not active. Please install and activate WooCommerce.
+                    </div>
+                <?php else: ?>
+                    <form id="bulkInventoryForm">
+                        <div style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px;">
+                            <table class="wp-list-table widefat striped" id="inventoryTable">
+                                <thead>
+                                    <tr style="position: sticky; top: 0; background: #f0f0f1; z-index: 1;">
+                                        <th style="width:10%; text-align:center;">ID</th>
+                                        <th style="width:40%;">Product Name</th>
+                                        <th style="width:25%;">Price (₹)</th>
+                                        <th style="width:25%;">Stock Quantity</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($wc_products as $product): ?>
+                                    <tr class="inv-row" data-id="<?php echo $product->get_id(); ?>" data-name="<?php echo esc_attr(strtolower($product->get_name())); ?>">
+                                        <td style="text-align:center; vertical-align:middle; color:#888;">#<?php echo $product->get_id(); ?></td>
+                                        <td style="vertical-align:middle; font-weight:600;">
+                                            <a href="<?php echo get_edit_post_link($product->get_id()); ?>" target="_blank" style="text-decoration:none; color:#1d2327;">
+                                                <?php echo esc_html($product->get_name()); ?> ↗
+                                            </a>
+                                        </td>
+                                        <td>
+                                            <input type="number" step="0.01" class="inv-field inv-price" 
+                                                   data-orig="<?php echo esc_attr($product->get_regular_price()); ?>" 
+                                                   value="<?php echo esc_attr($product->get_regular_price()); ?>" 
+                                                   style="width:90%;">
+                                        </td>
+                                        <td>
+                                            <input type="number" class="inv-field inv-stock" 
+                                                   data-orig="<?php echo esc_attr($product->get_manage_stock() ? $product->get_stock_quantity() : ''); ?>" 
+                                                   value="<?php echo esc_attr($product->get_manage_stock() ? $product->get_stock_quantity() : ''); ?>" 
+                                                   placeholder="Manage manually"
+                                                   style="width:90%;">
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </form>
                 <?php endif; ?>
             </div>
-            <!-- DYNAMIC PRICING MANAGER -->
+
+            <!-- PREVIEW MODAL (Hidden by default) -->
+            <div id="previewModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:99999; align-items:center; justify-content:center;">
+                <div style="background:white; width:800px; max-width:90%; max-height:80vh; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.2); display:flex; flex-direction:column;">
+                    <div style="padding:20px 25px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+                        <h2 style="margin:0; font-size:22px; color:#ea580c;">Review Your Changes</h2>
+                        <button type="button" onclick="document.getElementById('previewModal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:#888;">&times;</button>
+                    </div>
+                    
+                    <div style="padding:25px; overflow-y:auto; flex-grow:1; background:#f9fafb;" id="previewContent">
+                        <!-- Diff content will be injected here -->
+                    </div>
+
+                    <div style="padding:20px 25px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:15px; background:#fff; border-radius:0 0 12px 12px;">
+                        <button type="button" onclick="document.getElementById('previewModal').style.display='none'" class="button" style="padding:0 20px;">Cancel</button>
+                        <button type="button" id="confirmSaveBtn" class="button button-primary" style="background:#16a34a; border-color:#15803d; padding:0 25px; font-weight:bold;">Confirm & Save All To Database</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DYNAMIC PRICING CONFIGURATION -->
             <div
-                style="flex:100%; min-width:100%; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-top:10px;">
-                <h2>💰 Pricing & Fees Manager</h2>
-                <p style="color:#666;">Change the live prices for Doctor Consultations and Grooming Services directly here.
-                    Leave empty or set to -1 for Puppy categories where not applicable.</p>
+                style="flex:100%; min-width:100%; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-top:20px;">
+                <h2>💵 Services Pricing Configuration</h2>
+                <p style="color:#666;">These prices apply instantly to the frontend booking form. Leave a grooming field
+                    empty (or negative) to disable that specific size.</p>
+
                 <form method="POST">
                     <input type="hidden" name="opc_action" value="update_pricing">
-                    <h3 style="margin-top:20px; border-bottom:1px solid #ccc; padding-bottom:5px;">Doctor Fees</h3>
-                    <div
-                        style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:15px; margin-bottom: 20px;">
+
+                    <h3 style="margin-top:20px; border-bottom:1px solid #ccc; padding-bottom:5px;">Doctor Consultation
+                        Fees</h3>
+                    <div style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom: 20px;">
                         <?php foreach ($prices['doctors'] as $doc => $fee): ?>
                             <div>
                                 <label style="display:block; font-weight:bold;"><?php echo esc_html($doc); ?></label>
@@ -623,6 +713,7 @@ function opc_v5_render_admin_dashboard_safe()
                             </div>
                         <?php endforeach; ?>
                     </div>
+
                     <h3 style="margin-top:20px; border-bottom:1px solid #ccc; padding-bottom:5px;">Grooming Services</h3>
                     <table class="wp-list-table widefat striped">
                         <thead>
@@ -649,11 +740,13 @@ function opc_v5_render_admin_dashboard_safe()
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+
                     <button type="submit" class="button button-primary"
                         style="margin-top:15px; height:40px; background:#16a34a; border-color:#16a34a; width: 200px;">Save
                         Pricing</button>
                 </form>
             </div>
+
             <!-- COMPONENT FOR RENDERING BOOKINGS TABLE -->
             <?php
             function render_bookings_table($title, $desc, $bookings, $times, $show_actions = true) {
@@ -703,9 +796,12 @@ function opc_v5_render_admin_dashboard_safe()
                 <?php
             }
             ?>
-                $rescheduled_bookings,
-                $times
-            ); ?>
+
+            <!-- TABLES -->
+            <?php render_bookings_table("✅ Active Appointments", "These are the regular appointments requested by customers.", $active_bookings, $times); ?>
+            <?php render_bookings_table("🔄 Rescheduled Appointments", "These appointments have already been rescheduled.", $rescheduled_bookings, $times); ?>
+            <?php render_bookings_table("🏆 Completed Appointments", "These appointments have been marked as completed.", $completed_bookings, $times, false); ?>
+
             <!-- DANGER ZONE -->
             <div
                 style="flex:100%; min-width:100%; background:#fff5f5; padding:25px; border-radius:8px; border:2px solid #feb2b2; margin-top:20px;">
@@ -722,11 +818,14 @@ function opc_v5_render_admin_dashboard_safe()
                     </button>
                 </form>
             </div>
+
         </div>
     </div>
+
     <script>
         document.querySelector('input[name="block_all_day"]').addEventListener('change', function () { document.getElementById('timepicker').style.opacity = this.checked ? '0.5' : '1'; });
         document.querySelector('input[name="unblock_all_day"]').addEventListener('change', function () { document.getElementById('untimepicker').style.opacity = this.checked ? '0.5' : '1'; });
+
         // --- INVENTORY MANAGER SEARCH, HIGHLIGHT & PREVIEW ---
         document.addEventListener('DOMContentLoaded', function() {
             const invSearch = document.getElementById('inventorySearch');
@@ -736,6 +835,7 @@ function opc_v5_render_admin_dashboard_safe()
             const previewContent = document.getElementById('previewContent');
             const confirmSaveBtn = document.getElementById('confirmSaveBtn');
             const bulkForm = document.getElementById('bulkInventoryForm');
+
             if(invSearch && invTable) {
                 // 1. Live Search
                 invSearch.addEventListener('input', function(e) {
@@ -750,6 +850,7 @@ function opc_v5_render_admin_dashboard_safe()
                         }
                     });
                 });
+
                 // 2. Highlight Changes & Show Main Save Button
                 const inputs = invTable.querySelectorAll('.inv-field');
                 inputs.forEach(input => {
@@ -757,115 +858,152 @@ function opc_v5_render_admin_dashboard_safe()
                         const row = this.closest('tr');
                         const rowInputs = row.querySelectorAll('.inv-field');
                         let isChanged = false;
+                        
                         rowInputs.forEach(inp => {
-                            // Compare using standard string comparison. Make sure '' matches original if needed
-                            let val = inp.value;
-                            if (val !== inp.getAttribute('data-orig')) {
+                            if(inp.value !== inp.getAttribute('data-orig')) {
                                 isChanged = true;
                             }
                         });
+
                         if (isChanged) {
-                            row.style.backgroundColor = '#fed7aa'; // Nice orange highlight
+                            row.style.backgroundColor = '#fffbeb'; // Orange tint
+                            row.style.boxShadow = 'inset 0 0 0 1px #fcd34d';
                             row.classList.add('is-modified');
                         } else {
                             row.style.backgroundColor = '';
+                            row.style.boxShadow = '';
                             row.classList.remove('is-modified');
                         }
-                        // Check if any row in entire table has modifications
-                        const anyChangedRows = invTable.querySelector('.is-modified');
-                        if (anyChangedRows) {
+
+                        // Count total changes and show/hide preview button
+                        const modifiedRowsCount = invTable.querySelectorAll('tr.is-modified').length;
+                        document.getElementById('changeCount').innerText = modifiedRowsCount;
+                        if (modifiedRowsCount > 0) {
                             previewBtn.style.display = 'block';
                         } else {
                             previewBtn.style.display = 'none';
-                            if (previewModal.style.display === 'flex') {
-                                previewModal.style.display = 'none';
-                            }
                         }
                     });
                 });
-                // 3. Open Preview Modal
+
+                // 3. Generate Preview Modal
                 previewBtn.addEventListener('click', function() {
-                    let html = '<ul style="margin:0; padding-left:20px; line-height:1.6; font-size:14px;">';
-                    const modifiedRows = invTable.querySelectorAll('.is-modified');
+                    const modifiedRows = invTable.querySelectorAll('tr.is-modified');
+                    let html = '<table style="width:100%; border-collapse:collapse; margin-bottom:10px;">';
+                    html += '<tr style="background:#eee; text-align:left;"><th style="padding:10px; border-bottom:2px solid #ddd;">Product</th><th style="padding:10px; border-bottom:2px solid #ddd;">Change details</th></tr>';
                     
-                    if(modifiedRows.length === 0) return;
                     modifiedRows.forEach(row => {
-                        const name = row.querySelector('.inv-name strong').textContent;
-                        const qtyInput = row.querySelector('.inv-qty');
-                        const priceInput = row.querySelector('.inv-price');
-                        const origQty = qtyInput.getAttribute('data-orig');
-                        const newQty = qtyInput.value;
-                        const origPrice = priceInput.getAttribute('data-orig');
-                        const newPrice = priceInput.value;
+                        const name = row.querySelector('a').innerText;
+                        const priceInp = row.querySelector('.inv-price');
+                        const stockInp = row.querySelector('.inv-stock');
+                        
                         let changes = [];
-                        if (origQty !== newQty) {
-                            changes.push(`<span style="color:#64748b;">Qty:</span> <span style="text-decoration:line-through; color:#ef4444;">${origQty}</span> ➔ <strong style="color:#10b981;">${newQty || '0'}</strong>`);
+                        
+                        if (priceInp.value !== priceInp.getAttribute('data-orig')) {
+                            changes.push(`Price: <strike style="color:#999;">₹${priceInp.getAttribute('data-orig')}</strike> &rarr; <strong style="color:#ea580c;">₹${priceInp.value}</strong>`);
                         }
-                        if (origPrice !== newPrice) {
-                            changes.push(`<span style="color:#64748b;">Price:</span> <span style="text-decoration:line-through; color:#ef4444;">₹${origPrice}</span> ➔ <strong style="color:#10b981;">₹${newPrice || '0'}</strong>`);
+                        if (stockInp.value !== stockInp.getAttribute('data-orig')) {
+                            let oldStock = stockInp.getAttribute('data-orig') || 'N/A';
+                            let newStock = stockInp.value || 'N/A';
+                            changes.push(`Stock: <strike style="color:#999;">${oldStock}</strike> &rarr; <strong style="color:#16a34a;">${newStock}</strong>`);
                         }
-                        if (changes.length > 0) {
-                            html += `<li style="margin-bottom:8px;"><strong>${name}</strong><br>` + changes.join(' <span style="margin:0 8px; color:#cbd5e1;">|</span> ') + `</li>`;
-                        }
+
+                        html += `<tr>
+                                    <td style="padding:12px 10px; border-bottom:1px solid #eee; width:45%;"><strong>${name}</strong></td>
+                                    <td style="padding:12px 10px; border-bottom:1px solid #eee;">${changes.join('<br>')}</td>
+                                 </tr>`;
                     });
                     
-                    html += '</ul>';
+                    html += '</table>';
                     previewContent.innerHTML = html;
                     previewModal.style.display = 'flex';
                 });
-                // 4. Submit form exactly once
+
+                // 4. Submit Changes via AJAX
                 confirmSaveBtn.addEventListener('click', function() {
-                    confirmSaveBtn.innerHTML = '<span class="dashicons dashicons-update" style="margin-right:4px;"></span> Saving...';
-                    confirmSaveBtn.style.opacity = '0.7';
-                    confirmSaveBtn.style.pointerEvents = 'none';
-                    
-                    // We only want to submit the input fields that actually changed so we don't send 50 useless fields back
-                    // Actually, submitting all is fine, but to be safe and clean, we disable the ones that HAVEN'T changed
-                    const unchangedInputs = invTable.querySelectorAll('.inv-row:not(.is-modified) .inv-field');
-                    unchangedInputs.forEach(inp => inp.disabled = true);
-                    bulkForm.submit();
+                    const modifiedRows = invTable.querySelectorAll('tr.is-modified');
+                    let changesPayload = [];
+
+                    modifiedRows.forEach(row => {
+                        const id = row.getAttribute('data-id');
+                        const price = row.querySelector('.inv-price').value;
+                        const stock = row.querySelector('.inv-stock').value;
+                        changesPayload.push({ id, price, stock });
+                    });
+
+                    confirmSaveBtn.innerText = 'Saving...';
+                    confirmSaveBtn.disabled = true;
+
+                    fetch(ajaxurl + '?action=update_wc_inventory_bulk', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ changes: changesPayload })
+                    })
+                    .then(res => res.json())
+                    .then(res => {
+                        if (res.success) {
+                            alert(res.data.message);
+                            location.reload(); 
+                        } else {
+                            alert("Error: " + res.data.message);
+                            confirmSaveBtn.innerText = 'Confirm & Save All To Database';
+                            confirmSaveBtn.disabled = false;
+                        }
+                    })
+                    .catch(err => {
+                        alert("An error occurred during save.");
+                        confirmSaveBtn.innerText = 'Confirm & Save All To Database';
+                        confirmSaveBtn.disabled = false;
+                    });
                 });
             }
         });
     </script>
     <?php
 }
-// ─────────────────────────────────────────────────────────────
-// 3. WOOCOMMERCE MY ACCOUNT - MY SERVICES TAB
-// ─────────────────────────────────────────────────────────────
-// 1. Register new endpoint
+
+/* =========================================================================
+ * ADD THE CUSTOM WOOCOMMERCE ENDPOINT LOGIC
+ * ========================================================================= */
+
+// 1. Register the custom endpoint URL slug
 add_action('init', 'opc_add_services_endpoint');
 function opc_add_services_endpoint() {
     add_rewrite_endpoint('my-services', EP_ROOT | EP_PAGES);
 }
-// 2. Add query var
-add_filter('query_vars', 'opc_services_query_vars', 0);
-function opc_services_query_vars($vars) {
-    $vars[] = 'my-services';
-    return $vars;
+
+// 2. Add the title for the new tab
+add_filter('woocommerce_endpoint_my-services_title', 'opc_services_endpoint_title');
+function opc_services_endpoint_title() {
+    return 'My Services';
 }
-// 3. Insert into My Account menu
-add_filter('woocommerce_account_menu_items', 'opc_add_services_link_my_account');
-function opc_add_services_link_my_account($items) {
-    // Insert it after 'orders'
-    $new_items = array();
-    foreach ($items as $key => $val) {
-        $new_items[$key] = $val;
+
+// 3. Add the new tab to the My Account menu links
+add_filter('woocommerce_account_menu_items', 'opc_add_services_link', 40);
+function opc_add_services_link($menu_links) {
+    // Insert after Orders (or just at the end)
+    $new_links = array();
+    foreach ($menu_links as $key => $val) {
+        $new_links[$key] = $val;
         if ($key === 'orders') {
-            $new_items['my-services'] = 'My Services';
+            $new_links['my-services'] = 'My Services';
         }
     }
-    // If orders tab isn't found for some reason, just append to bottom
-    if (!isset($new_items['my-services'])) {
-        $new_items['my-services'] = 'My Services';
+    // Fallback if 'orders' doesn't exist
+    if (!isset($new_links['my-services'])) {
+        $new_links['my-services'] = 'My Services';
     }
-    return $new_items;
+    return $new_links;
 }
+
 // 4. Render content for the endpoint
 add_action('woocommerce_account_my-services_endpoint', 'opc_services_endpoint_content');
 function opc_services_endpoint_content() {
     $current_user = wp_get_current_user();
     if (!$current_user->exists()) return;
+
     // Process Customer Cancellation
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['customer_cancel_id'])) {
         $cancel_id = sanitize_text_field($_POST['customer_cancel_id']);
@@ -877,6 +1015,7 @@ function opc_services_endpoint_content() {
         $process_cancellation = function(&$array_ref, $key, $b) use (&$changed) {
             $array_ref[$key]['status'] = 'cancelled';
             $changed = true;
+
             $type = $b['type'] ?? 'grooming';
             $date = $b['date'] ?? '';
             $time = $b['time'] ?? '';
@@ -890,6 +1029,7 @@ function opc_services_endpoint_content() {
                 }
             }
         };
+
         foreach ($history as $key => $h) {
             if (($h['id'] ?? '') === $cancel_id && ($h['status'] ?? '') !== 'cancelled' && ($h['status'] ?? '') !== 'completed') {
                 $process_cancellation($history, $key, $h);
@@ -907,79 +1047,82 @@ function opc_services_endpoint_content() {
             echo '<div class="woocommerce-message" role="alert">Your appointment has been successfully cancelled.</div>';
         }
     }
+
     // Fetch user details to link their historical appointments
     $user_email = $current_user->user_email;
     $wc_phone = get_user_meta($current_user->ID, 'billing_phone', true);
-    // Sanitize phone to only numbers for robust matching
-    if (!empty($wc_phone)) {
-        $wc_phone = preg_replace('/[^0-9]/', '', $wc_phone);
-    }
+    
+    // We will look up bookings in opc_booking_history (the permanent log)
     $history = get_option('opc_booking_history', array());
-    $legacy = get_option('opc_all_bookings', array());
-    
-    // Combine legacy and history, resolving duplicates by ID
-    $all_user_records = array();
+    $my_bookings = array();
+
+    // 6-month cutoff
     $six_months_ago = strtotime('-6 months');
-    
-    $check_booking = function($b) use ($user_email, $wc_phone, $six_months_ago, &$all_user_records) {
-        $b_email = strtolower(trim($b['email'] ?? ''));
-        $b_phone = preg_replace('/[^0-9]/', '', $b['phone'] ?? '');
-        $b_date = strtotime($b['date']);
-        
-        $match_email = !empty($user_email) && $b_email === strtolower($user_email);
-        $match_phone = !empty($wc_phone) && $b_phone === $wc_phone;
-        
-        if (($match_email || $match_phone) && $b_date >= $six_months_ago) {
-            $id = $b['id'] ?? uniqid();
-            $all_user_records[$id] = $b;
+
+    foreach ($history as $booking) {
+        $booking_time = strtotime($booking['timestamp'] ?? $booking['date']);
+        if ($booking_time > $six_months_ago) {
+            // Match against user's WordPress email OR their WooCommerce billing phone number
+            if (($booking['email'] === $user_email) || (!empty($wc_phone) && $booking['phone'] === $wc_phone)) {
+                $my_bookings[] = $booking;
+            }
         }
-    };
-    
-    if (is_array($history)) { foreach ($history as $b) { $check_booking($b); } }
-    if (is_array($legacy)) { foreach ($legacy as $b) { $check_booking($b); } }
-    $user_bookings = array_values($all_user_records);
-    // Sort by date descending
-    usort($user_bookings, function($a, $b) {
-        return strtotime($b['date']) - strtotime($a['date']);
+    }
+
+    // Sort descending by date
+    usort($my_bookings, function($a, $b) {
+        return strtotime($b['date'] . ' ' . $b['time']) - strtotime($a['date'] . ' ' . $a['time']);
     });
-    echo '<h3 style="margin-bottom:15px; color:#ea580c; display:flex; align-items:center;"><span class="dashicons dashicons-pets" style="margin-right:8px; line-height:unset;"></span> My Service Appointments (Last 6 Months)</h3>';
-    if (empty($user_bookings)) {
-        echo '<div class="woocommerce-info">You have not booked any services with us in the last 6 months.</div>';
+
+    echo '<h2 style="margin-top:0;">My Services History</h2>';
+    
+    if (empty($my_bookings)) {
+        echo '<div class="woocommerce-info">You have not booked any services yet.</div>';
     } else {
+        echo '<p>Here is a list of your pet\'s appointments from the last 6 months.</p>';
         echo '<table class="woocommerce-orders-table woocommerce-MyAccount-orders shop_table shop_table_responsive my_account_orders account-orders-table">';
         echo '<thead><tr>';
-        echo '<th class="woocommerce-orders-table__header">Service Type</th>';
-        echo '<th class="woocommerce-orders-table__header">Details</th>';
-        echo '<th class="woocommerce-orders-table__header">Date & Time</th>';
-        echo '<th class="woocommerce-orders-table__header">Status</th>';
-        echo '</tr></thead><tbody>';
-        foreach ($user_bookings as $booking) {
+        echo '<th class="woocommerce-orders-table__header"><span class="nobr">Service Type</span></th>';
+        echo '<th class="woocommerce-orders-table__header"><span class="nobr">Details</span></th>';
+        echo '<th class="woocommerce-orders-table__header"><span class="nobr">Date & Time</span></th>';
+        echo '<th class="woocommerce-orders-table__header"><span class="nobr">Total</span></th>';
+        echo '<th class="woocommerce-orders-table__header"><span class="nobr">Status</span></th>';
+        echo '</tr></thead>';
+        echo '<tbody>';
+
+        foreach ($my_bookings as $booking) {
             echo '<tr class="woocommerce-orders-table__row">';
             
             // Service Type
             echo '<td class="woocommerce-orders-table__cell" data-title="Service Type">';
-            if (isset($booking['type']) && $booking['type'] === 'doctor') {
-                echo '<span style="display:inline-block; background:#e0f2fe; color:#0369a1; padding:3px 8px; border-radius:4px; font-size:12px; font-weight:bold;">Doctor</span>';
+            if (($booking['type'] ?? '') === 'doctor') {
+                echo '<span style="display:inline-block; padding:4px 8px; background:#e0f2fe; color:#0369a1; border-radius:4px; font-weight:600; font-size:13px;">Doctor Consult</span>';
             } else {
-                echo '<span style="display:inline-block; background:#fce7f3; color:#be185d; padding:3px 8px; border-radius:4px; font-size:12px; font-weight:bold;">Grooming</span>';
+                echo '<span style="display:inline-block; padding:4px 8px; background:#fce7f3; color:#be185d; border-radius:4px; font-weight:600; font-size:13px;">Grooming</span>';
             }
             echo '</td>';
+
             // Details
             echo '<td class="woocommerce-orders-table__cell" data-title="Details">';
-            if (isset($booking['type']) && $booking['type'] === 'doctor') {
-                echo '<strong>' . esc_html($booking['doctor'] ?? 'Consultation') . '</strong>';
+            if (($booking['type'] ?? '') === 'doctor') {
+                echo '<strong>' . esc_html($booking['doctor'] ?? 'General') . '</strong>';
             } else {
-                echo '<strong>' . esc_html($booking['category'] ?? 'Grooming Service') . '</strong><br>';
-                if (!empty($booking['breed'])) {
-                    echo '<small style="color:#666;">Size/Breed: ' . esc_html($booking['breed']) . '</small>';
-                }
+                echo '<strong>' . esc_html($booking['category'] ?? 'General') . '</strong><br>';
+                echo '<span style="font-size:0.9em; color:#666;">Size: ' . esc_html($booking['breed'] ?? 'Unknown') . '</span>';
             }
             echo '</td>';
+
             // Date & Time
             echo '<td class="woocommerce-orders-table__cell" data-title="Date & Time">';
-            echo '<strong>' . date_i18n(get_option('date_format'), strtotime($booking['date'])) . '</strong><br>';
-            echo '<span style="color:#ea580c;">' . esc_html($booking['time']) . '</span>';
+            echo '<strong>' . date('M j, Y', strtotime($booking['date'])) . '</strong><br>';
+            echo '<span style="color:#ea580c; font-weight:bold;">' . esc_html($booking['time']) . '</span>';
             echo '</td>';
+
+            // Total
+            echo '<td class="woocommerce-orders-table__cell" data-title="Total">';
+            echo '<span class="woocommerce-Price-amount amount"><bdi><span class="woocommerce-Price-currencySymbol">₹</span>' . number_format_i18n($booking['amount'] ?? 0, 2) . '</bdi></span>';
+            echo '</td>';
+
             // Status
             echo '<td class="woocommerce-orders-table__cell" data-title="Status">';
             $status = $booking['status'] ?? 'active';
@@ -992,6 +1135,7 @@ function opc_services_endpoint_content() {
             } else {
                 echo '<mark class="order-status status-processing" style="background:#d1fae5; color:#065f46; padding:3px 8px; border-radius:4px; font-size:12px; margin-bottom:5px; display:inline-block;"><span>Active</span></mark>';
             }
+
             // Show Cancel button if active or rescheduled and datetime is in future (or today)
             if (($status === 'active' || $status === 'rescheduled') && strtotime($booking['date']) >= strtotime('today')) {
                 echo '<form method="POST" style="margin-top:10px;" onsubmit="return confirm(\'Are you sure you want to cancel this appointment? This cannot be undone.\');">';
@@ -999,16 +1143,11 @@ function opc_services_endpoint_content() {
                 echo '<button type="submit" class="button" style="padding:4px 8px; font-size:11px; color:#dc2626; border-color:#fca5a5; background:white;">Cancel Service</button>';
                 echo '</form>';
             }
+
             echo '</td>';
+
             echo '</tr>';
         }
         echo '</tbody></table>';
     }
 }
-// Automatically flush rewrite rules once when this new version is active
-add_action('init', function() {
-    if (!get_option('opc_services_endpoint_flushed_v64')) {
-        flush_rewrite_rules();
-        update_option('opc_services_endpoint_flushed_v64', 'yes');
-    }
-});
