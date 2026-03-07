@@ -544,7 +544,7 @@ function opc_v5_render_admin_dashboard_safe()
     $completed_bookings = array();
     $cancelled_bookings = array();
     $today_bookings = array();
-    $today_str = date('Y-m-d');
+    $today_str = wp_date('Y-m-d');
     if (!empty($all_bookings) && is_array($all_bookings)) {
         foreach ($all_bookings as $phone => $b) {
             $status = $b['status'] ?? 'active';
@@ -569,7 +569,9 @@ function opc_v5_render_admin_dashboard_safe()
         uasort($arr, function ($a, $b) {
             $dt_a = strtotime(($a['date'] ?? '1970-01-01') . ' ' . ($a['time'] ?? '00:00 AM'));
             $dt_b = strtotime(($b['date'] ?? '1970-01-01') . ' ' . ($b['time'] ?? '00:00 AM'));
-            return $dt_a - $dt_b;
+            if ($dt_a === $dt_b)
+                return 0;
+            return ($dt_a < $dt_b) ? -1 : 1;
         });
     };
     $sort_by_datetime($active_bookings);
@@ -710,7 +712,8 @@ function opc_v5_render_admin_dashboard_safe()
                                                 <td class="inv-name" style="vertical-align:middle;">
                                                     <strong><?php echo esc_html($product->get_name()); ?></strong><br><span
                                                         style="color:#666; font-size:11px;">Current: <?php echo $stock; ?> stock |
-                                                        ₹<?php echo esc_html($price); ?></span></td>
+                                                        ₹<?php echo esc_html($price); ?></span>
+                                                </td>
                                                 <td style="vertical-align:middle;">
                                                     <input type="number" class="inv-field inv-qty"
                                                         name="bulk_inventory[<?php echo $pid; ?>][qty]" value="<?php echo $stock; ?>"
@@ -845,11 +848,12 @@ function opc_v5_render_admin_dashboard_safe()
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($bookings as $phone => $b): ?>
+                                    <?php foreach ($bookings as $key => $b): ?>
                                         <tr>
                                             <td style="vertical-align:middle;">
                                                 <strong><?php echo esc_html($b['name'] ?? 'Unknown'); ?></strong><br><span
-                                                    style="color:#666; font-size:12px;"><?php echo esc_html($phone); ?></span></td>
+                                                    style="color:#666; font-size:12px;"><?php echo esc_html($b['phone'] ?? $key); ?></span>
+                                            </td>
                                             <td style="vertical-align:middle;">
                                                 <?php if (isset($b['type']) && $b['type'] === 'doctor'): ?>
                                                     <span
@@ -866,7 +870,8 @@ function opc_v5_render_admin_dashboard_safe()
                                             </td>
                                             <td style="vertical-align:middle; font-weight:bold;">
                                                 <?php echo esc_html($b['date']); ?><br><span
-                                                    style="color:#ea580c;"><?php echo esc_html($b['time']); ?></span></td>
+                                                    style="color:#ea580c;"><?php echo esc_html($b['time']); ?></span>
+                                            </td>
                                             <?php if ($show_actions): ?>
                                                 <td>
                                                     <form method="POST"
