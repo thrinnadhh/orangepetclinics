@@ -496,6 +496,33 @@ function opc_v5_render_admin_dashboard_safe()
         }
     }
 
+    // Handle Admin Refund Appointment
+    if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'admin_refund') {
+        $refund_id = sanitize_text_field($_POST['refund_id'] ?? '');
+
+        if (!empty($refund_id)) {
+            $all_bookings = get_option('opc_all_bookings', array());
+            if (isset($all_bookings[$refund_id])) {
+                $phone = $all_bookings[$refund_id]['phone'];
+
+                // Update all_bookings array
+                $all_bookings[$refund_id]['payment_status'] = 'refunded';
+                update_option('opc_all_bookings', $all_bookings);
+
+                // Update in history array as well
+                $history = get_option('opc_booking_history', array());
+                foreach ($history as $key => $h) {
+                    if (($h['phone'] ?? '') === $phone) {
+                        $history[$key]['payment_status'] = 'refunded';
+                    }
+                }
+                update_option('opc_booking_history', $history);
+
+                $message = '<div class="notice notice-success"><p>✅ Successfully marked payment as Refunded!</p></div>';
+            }
+        }
+    }
+
     // Handle Dynamic Pricing Update
     if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'update_pricing') {
         $prices = opc_v5_get_current_prices();
@@ -873,32 +900,46 @@ function opc_v5_render_admin_dashboard_safe()
                                             <?php if ($show_actions): ?>
                                                 <td>
                                                     <div style="display:flex; flex-direction:column; gap:8px;">
-                                                        <form method="POST"
-                                                            style="display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin:0;">
-                                                            <input type="hidden" name="opc_action" value="admin_reschedule"><input
-                                                                type="hidden" name="resch_id"
-                                                                value="<?php echo esc_attr($b['id'] ?? $key); ?>">
-                                                            <div style="display:flex; gap:5px;"><input type="date" name="resch_date"
-                                                                    required style="padding:4px; width:130px;"
-                                                                    min="<?php echo date('Y-m-d'); ?>"><select name="resch_time" required
-                                                                    style="padding:4px; width:100px;">
-                                                                    <option value="">Time...</option>
-                                                                    <?php foreach ($times as $t)
-                                                                        echo "<option value='$t'>$t</option>"; ?>
-                                                                </select></div>
-                                                            <button type="submit" class="button button-primary"
-                                                                style="width: 100%;">Reschedule
-                                                                Slot</button>
-                                                        </form>
-                                                        <?php if (($b['status'] ?? 'active') !== 'completed'): ?>
+                                                        <?php if (($b['status'] ?? 'active') !== 'cancelled'): ?>
+                                                            <form method="POST"
+                                                                style="display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin:0;">
+                                                                <input type="hidden" name="opc_action" value="admin_reschedule"><input
+                                                                    type="hidden" name="resch_id"
+                                                                    value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                                <div style="display:flex; gap:5px;"><input type="date" name="resch_date"
+                                                                        required style="padding:4px; width:130px;"
+                                                                        min="<?php echo date('Y-m-d'); ?>"><select name="resch_time" required
+                                                                        style="padding:4px; width:100px;">
+                                                                        <option value="">Time...</option>
+                                                                        <?php foreach ($times as $t)
+                                                                            echo "<option value='$t'>$t</option>"; ?>
+                                                                    </select></div>
+                                                                <button type="submit" class="button button-primary"
+                                                                    style="width: 100%;">Reschedule
+                                                                    Slot</button>
+                                                            </form>
+                                                            <?php if (($b['status'] ?? 'active') !== 'completed'): ?>
+                                                                <form method="POST" style="margin:0;"
+                                                                    onsubmit="return confirm('Mark this appointment as Completed?');">
+                                                                    <input type="hidden" name="opc_action" value="admin_complete">
+                                                                    <input type="hidden" name="complete_id"
+                                                                        value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                                    <button type="submit" class="button"
+                                                                        style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
+                                                                        Mark Completed</button>
+                                                                </form>
+                                                            <?php endif; ?>
+                                                        <?php endif; ?>
+
+                                                        <?php if (($b['status'] ?? 'active') === 'cancelled' && ($b['payment_method'] ?? '') === 'online' && ($b['payment_status'] ?? '') !== 'refunded'): ?>
                                                             <form method="POST" style="margin:0;"
-                                                                onsubmit="return confirm('Mark this appointment as Completed?');">
-                                                                <input type="hidden" name="opc_action" value="admin_complete">
-                                                                <input type="hidden" name="complete_id"
+                                                                onsubmit="return confirm('Mark this online payment as Refunded?');">
+                                                                <input type="hidden" name="opc_action" value="admin_refund">
+                                                                <input type="hidden" name="refund_id"
                                                                     value="<?php echo esc_attr($b['id'] ?? $key); ?>">
                                                                 <button type="submit" class="button"
-                                                                    style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
-                                                                    Mark Completed</button>
+                                                                    style="width: 100%; background:#fee2e2; color:#991b1b; border-color:#f87171;">💸
+                                                                    Mark Refunded</button>
                                                             </form>
                                                         <?php endif; ?>
                                                     </div>
@@ -939,7 +980,7 @@ function opc_v5_render_admin_dashboard_safe()
             <?php render_bookings_table("✅ Active Appointments", "These are the regular appointments requested by customers.", $active_bookings, $times); ?>
             <?php render_bookings_table("🔄 Rescheduled Appointments", "These appointments have already been rescheduled.", $rescheduled_bookings, $times); ?>
             <?php render_bookings_table("🌟 Completed Appointments", "These appointments have been marked as completed.", $completed_bookings, $times, false); ?>
-            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times, false); ?>
+            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times, true); ?>
 
             <!-- DANGER ZONE -->
             <div
