@@ -158,10 +158,45 @@ function opc_v5_custom_booking_handler()
             update_option('opc_booking_history', $history);
         }
 
-        wp_send_json_success("Booking saved!");
+        wp_send_json_success(array(
+            "message" => "Booking saved!",
+            "booking_id" => $booking_id
+        ));
     } catch (Exception $e) {
         wp_send_json_error($e->getMessage());
     }
+}
+
+add_action('wp_ajax_update_payment_id', 'opc_v5_update_payment_id');
+add_action('wp_ajax_nopriv_update_payment_id', 'opc_v5_update_payment_id');
+function opc_v5_update_payment_id()
+{
+    $data = json_decode(file_get_contents('php://input'), true);
+    $booking_id = sanitize_text_field($data['booking_id'] ?? '');
+    $payment_id = sanitize_text_field($data['payment_id'] ?? '');
+
+    if (empty($booking_id) || empty($payment_id)) {
+        wp_send_json_error('Missing booking ID or payment ID.');
+        wp_die();
+    }
+
+    $all_bookings = get_option('opc_all_bookings', array());
+    if (isset($all_bookings[$booking_id])) {
+        $all_bookings[$booking_id]['razorpay_payment_id'] = $payment_id;
+        update_option('opc_all_bookings', $all_bookings);
+    }
+
+    $history = get_option('opc_booking_history', array());
+    foreach ($history as $key => &$h) {
+        if (isset($h['id']) && $h['id'] === $booking_id) {
+            $h['razorpay_payment_id'] = $payment_id;
+            break;
+        }
+    }
+    update_option('opc_booking_history', $history);
+
+    wp_send_json_success("Payment ID updated");
+    wp_die();
 }
 
 add_action('wp_ajax_get_booked_slots', 'opc_v5_get_booked_slots_renamed');
@@ -202,8 +237,9 @@ function opc_v5_fetch_booking_renamed()
     $all_bookings = get_option('opc_all_bookings', array());
 
     $found = null;
-    foreach ($all_bookings as $b) {
-        if (($b['phone'] ?? '') === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
+    foreach ($all_bookings as $key => $b) {
+        $b_phone = $b['phone'] ?? $key;
+        if ($b_phone === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
             if (!$found || strtotime($b['date'] . ' ' . $b['time']) > strtotime($found['date'] . ' ' . $found['time'])) {
                 $found = $b;
             }
@@ -236,7 +272,8 @@ function opc_v5_reschedule_booking_renamed()
     $booking_id_to_edit = null;
 
     foreach ($all_bookings as $key => $b) {
-        if (($b['phone'] ?? '') === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
+        $b_phone = $b['phone'] ?? $key;
+        if ($b_phone === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
             $booking_id_to_edit = $key;
             break;
         }
@@ -474,22 +511,83 @@ function opc_v5_render_admin_dashboard_safe()
         if (!empty($complete_id)) {
             $all_bookings = get_option('opc_all_bookings', array());
             if (isset($all_bookings[$complete_id])) {
-                $phone = $all_bookings[$complete_id]['phone'];
+                $phone = $all_bookings[$complete_id]['phone'] ?? $complete_id;
 
                 // Update all_bookings array
                 $all_bookings[$complete_id]['status'] = 'completed';
+                $all_bookings[$complete_id]['payment_status'] = 'completed';
                 update_option('opc_all_bookings', $all_bookings);
 
                 // Update in history array as well
                 $history = get_option('opc_booking_history', array());
-                foreach ($history as $key => $h) {
-                    if (($h['phone'] ?? '') === $phone) {
-                        $history[$key]['status'] = 'completed';
+                foreach ($history as $key => &$h) {
+                    if ((isset($h['id']) && $h['id'] === $complete_id) || (($h['phone'] ?? '') === $phone && $phone !== $complete_id)) {
+                        $h['status'] = 'completed';
+                        $h['payment_status'] = 'completed';
                     }
                 }
                 update_option('opc_booking_history', $history);
 
                 $message = '<div class="notice notice-success"><p>✅ Successfully marked appointment as Completed!</p></div>';
+            }
+        }
+    }
+
+    // Handle Admin Refund Appointment
+    if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'admin_refund') {
+        $refund_id = sanitize_text_field($_POST['refund_id'] ?? '');
+
+        if (!empty($refund_id)) {
+            $all_bookings = get_option('opc_all_bookings', array());
+            if (isset($all_bookings[$refund_id])) {
+                $phone = $all_bookings[$refund_id]['phone'] ?? $refund_id;
+
+                // Refund logic with razorpay 
+                $payment_id = $all_bookings[$refund_id]['razorpay_payment_id'] ?? '';
+                $amount = $all_bookings[$refund_id]['amount'] ?? 0;
+
+                $rp_key = get_option('opc_razorpay_key_id', '');
+                $rp_secret = get_option('opc_razorpay_key_secret', '');
+
+                if (!empty($payment_id) && !empty($rp_key) && !empty($rp_secret)) {
+                    // Make API call
+                    $url = "https://api.razorpay.com/v1/payments/{$payment_id}/refund";
+                    $args = array(
+                        'headers' => array(
+                            'Authorization' => 'Basic ' . base64_encode($rp_key . ':' . $rp_secret),
+                            'Content-Type' => 'application/json'
+                        ),
+                        'body' => json_encode(array('amount' => $amount * 100)) // Amount in paise
+                    );
+                    $response = wp_remote_post($url, $args);
+                    if (is_wp_error($response)) {
+                        $message = '<div class="notice notice-error"><p>❌ Refund API Error: ' . esc_html($response->get_error_message()) . '</p></div>';
+                        goto end_refund;
+                    }
+                    $body = wp_remote_retrieve_body($response);
+                    $data = json_decode($body, true);
+                    if (isset($data['error'])) {
+                        $message = '<div class="notice notice-error"><p>❌ Gateway Error: ' . esc_html($data['error']['description']) . '</p></div>';
+                        goto end_refund;
+                    }
+                }
+
+                // Update all_bookings array
+                $all_bookings[$refund_id]['payment_status'] = 'refunded';
+                update_option('opc_all_bookings', $all_bookings);
+
+                // Update in history array as well
+                $history = get_option('opc_booking_history', array());
+                foreach ($history as $key => &$h) {
+                    if ((isset($h['id']) && $h['id'] === $refund_id) || (($h['phone'] ?? '') === $phone && $phone !== $refund_id)) {
+                        $h['payment_status'] = 'refunded';
+                    }
+                }
+                update_option('opc_booking_history', $history);
+
+                $message = '<div class="notice notice-success"><p>✅ Successfully marked payment as Refunded via API!</p></div>';
+                end_refund:
+                ;
             }
         }
     }
@@ -521,6 +619,12 @@ function opc_v5_render_admin_dashboard_safe()
         delete_option('opc_booked_slots_doctor');
         delete_option('opc_booked_slots_grooming');
         $message = '<div class="notice notice-success" style="background:#fee; border-color:#fcc;"><p>🚨 All bookings and blocked calendar slots have been permanently deleted!</p></div>';
+    }
+    // Handle Razorpay API Keys Update
+    if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'save_api_keys') {
+        update_option('opc_razorpay_key_id', sanitize_text_field($_POST['rp_key'] ?? ''));
+        update_option('opc_razorpay_key_secret', sanitize_text_field($_POST['rp_secret'] ?? ''));
+        $message = '<div class="notice notice-success"><p>✅ Razorpay API Credentials Saved!</p></div>';
     }
 
     // Get ALL WC Products Safely
@@ -871,32 +975,46 @@ function opc_v5_render_admin_dashboard_safe()
                                             <?php if ($show_actions): ?>
                                                 <td>
                                                     <div style="display:flex; flex-direction:column; gap:8px;">
-                                                        <form method="POST"
-                                                            style="display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin:0;">
-                                                            <input type="hidden" name="opc_action" value="admin_reschedule"><input
-                                                                type="hidden" name="resch_id"
-                                                                value="<?php echo esc_attr($b['id'] ?? $key); ?>">
-                                                            <div style="display:flex; gap:5px;"><input type="date" name="resch_date"
-                                                                    required style="padding:4px; width:130px;"
-                                                                    min="<?php echo date('Y-m-d'); ?>"><select name="resch_time" required
-                                                                    style="padding:4px; width:100px;">
-                                                                    <option value="">Time...</option>
-                                                                    <?php foreach ($times as $t)
-                                                                        echo "<option value='$t'>$t</option>"; ?>
-                                                                </select></div>
-                                                            <button type="submit" class="button button-primary"
-                                                                style="width: 100%;">Reschedule
-                                                                Slot</button>
-                                                        </form>
-                                                        <?php if (($b['status'] ?? 'active') !== 'completed'): ?>
+                                                        <?php if (($b['status'] ?? 'active') !== 'cancelled'): ?>
+                                                            <form method="POST"
+                                                                style="display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin:0;">
+                                                                <input type="hidden" name="opc_action" value="admin_reschedule"><input
+                                                                    type="hidden" name="resch_id"
+                                                                    value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                                <div style="display:flex; gap:5px;"><input type="date" name="resch_date"
+                                                                        required style="padding:4px; width:130px;"
+                                                                        min="<?php echo date('Y-m-d'); ?>"><select name="resch_time" required
+                                                                        style="padding:4px; width:100px;">
+                                                                        <option value="">Time...</option>
+                                                                        <?php foreach ($times as $t)
+                                                                            echo "<option value='$t'>$t</option>"; ?>
+                                                                    </select></div>
+                                                                <button type="submit" class="button button-primary"
+                                                                    style="width: 100%;">Reschedule
+                                                                    Slot</button>
+                                                            </form>
+                                                            <?php if (($b['status'] ?? 'active') !== 'completed'): ?>
+                                                                <form method="POST" style="margin:0;"
+                                                                    onsubmit="return confirm('Mark this appointment as Completed?');">
+                                                                    <input type="hidden" name="opc_action" value="admin_complete">
+                                                                    <input type="hidden" name="complete_id"
+                                                                        value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                                    <button type="submit" class="button"
+                                                                        style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
+                                                                        Mark Completed</button>
+                                                                </form>
+                                                            <?php endif; ?>
+                                                        <?php endif; ?>
+
+                                                        <?php if (($b['status'] ?? 'active') === 'cancelled' && ($b['payment_method'] ?? '') === 'online' && ($b['payment_status'] ?? '') !== 'refunded'): ?>
                                                             <form method="POST" style="margin:0;"
-                                                                onsubmit="return confirm('Mark this appointment as Completed?');">
-                                                                <input type="hidden" name="opc_action" value="admin_complete">
-                                                                <input type="hidden" name="complete_id"
+                                                                onsubmit="return confirm('Mark this online payment as Refunded?');">
+                                                                <input type="hidden" name="opc_action" value="admin_refund">
+                                                                <input type="hidden" name="refund_id"
                                                                     value="<?php echo esc_attr($b['id'] ?? $key); ?>">
                                                                 <button type="submit" class="button"
-                                                                    style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
-                                                                    Mark Completed</button>
+                                                                    style="width: 100%; background:#fee2e2; color:#991b1b; border-color:#f87171;">💸
+                                                                    Mark Refunded</button>
                                                             </form>
                                                         <?php endif; ?>
                                                     </div>
@@ -937,7 +1055,36 @@ function opc_v5_render_admin_dashboard_safe()
             <?php render_bookings_table("✅ Active Appointments", "These are the regular appointments requested by customers.", $active_bookings, $times); ?>
             <?php render_bookings_table("🔄 Rescheduled Appointments", "These appointments have already been rescheduled.", $rescheduled_bookings, $times); ?>
             <?php render_bookings_table("🌟 Completed Appointments", "These appointments have been marked as completed.", $completed_bookings, $times, false); ?>
-            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times, false); ?>
+            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times, true); ?>
+
+            <!-- API CREDENTIALS AREA -->
+            <div
+                style="flex:100%; min-width:100%; background:white; padding:25px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-top:20px;">
+                <h2 style="color:#0369a1;">🔑 API Credentials Configuration</h2>
+                <p style="color:#666; font-size: 13px;">Save your Razorpay Keys here so that you can issue automated Refunds
+                    directly from this dashboard.</p>
+                <form method="POST" style="max-width: 600px;">
+                    <input type="hidden" name="opc_action" value="save_api_keys">
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display:block; font-weight:bold; margin-bottom:5px;">Razorpay Key ID</label>
+                        <input type="text" name="rp_key"
+                            value="<?php echo esc_attr(get_option('opc_razorpay_key_id', '')); ?>"
+                            style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;"
+                            placeholder="rzp_live_...">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display:block; font-weight:bold; margin-bottom:5px;">Razorpay Key Secret</label>
+                        <input type="password" name="rp_secret"
+                            value="<?php echo esc_attr(get_option('opc_razorpay_key_secret', '')); ?>"
+                            style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;"
+                            placeholder="Paste secret here...">
+                    </div>
+
+                    <button type="submit" class="button button-primary" style="height:35px;">Save API Keys</button>
+                </form>
+            </div>
 
             <!-- DANGER ZONE -->
             <div

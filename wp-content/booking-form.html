@@ -581,7 +581,7 @@
         .then(res => res.json())
         .then(response => {
           if (response.success) {
-            handlePayment(payment, amount, description);
+            handlePayment(payment, amount, description, response.data.booking_id);
           } else {
             alert("❌ Booking Failed: " + (response.data || "Unknown server error."));
           }
@@ -596,18 +596,36 @@
         });
     });
 
-    function handlePayment(payment, amount, description) {
+    function handlePayment(payment, amount, description, bookingId) {
       if (payment === "online") {
         new Razorpay({
-          key: "rzp_live_SNY9C0XOxmEpGi",
+          key: '<?php echo esc_js(get_option("opc_razorpay_key_id", "rzp_live_SNY9C0XOxmEpGi")); ?>',
           amount: amount * 100,
           currency: "INR",
           name: "Orange Pet Clinic",
           description: description,
-          handler: function () { alert("✅ Payment successful & booking confirmed!"); }
+          handler: function (response) {
+            // Update the backend with the payment ID
+            fetch("/wp-admin/admin-ajax.php?action=update_payment_id", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                booking_id: bookingId,
+                payment_id: response.razorpay_payment_id
+              })
+            }).then(() => {
+              alert("✅ Payment successful & booking confirmed!\nPayment ID: " + response.razorpay_payment_id);
+              window.location.reload();
+            }).catch(err => {
+              console.error(err);
+              alert("✅ Payment successful! But failed to sync to dashboard.");
+              window.location.reload();
+            });
+          }
         }).open();
       } else {
         alert("✅ Booking confirmed! Please pay at the clinic.");
+        window.location.reload();
       }
     }
 
