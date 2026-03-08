@@ -84,6 +84,20 @@ function opc_v5_custom_booking_handler()
         $name = sanitize_text_field($data['name'] ?? '');
         $date = sanitize_text_field($data['date'] ?? '');
         $time = sanitize_text_field($data['time'] ?? '');
+        $payment_method = sanitize_text_field($data['payment'] ?? 'clinic');
+        $amount = floatval($data['amount'] ?? 0);
+
+        // Prevent Duplicate Bookings
+        $existing_bookings = get_option('opc_all_bookings', array());
+        if (!empty($existing_bookings)) {
+            foreach ($existing_bookings as $eb) {
+                if (($eb['date'] ?? '') === $date && ($eb['time'] ?? '') === $time && strtolower(trim($eb['email'] ?? '')) === strtolower(trim($user))) {
+                    if (($eb['status'] ?? 'active') !== 'cancelled') {
+                        throw new Exception('You already have an active appointment scheduled for this date and time.');
+                    }
+                }
+            }
+        }
 
         $message = '
         <div style="background:#f5f7fb;padding:30px;font-family:Arial,sans-serif">
@@ -128,7 +142,10 @@ function opc_v5_custom_booking_handler()
                 'type' => $type,
                 'category' => $category,
                 'breed' => $breed,
-                'doctor' => $doctor
+                'doctor' => $doctor,
+                'payment_method' => $payment_method,
+                'amount' => $amount,
+                'payment_status' => ($payment_method === 'online') ? 'completed' : 'pending' // Defaults for now
             );
             $bookings[$booking_id] = $booking_data;
             update_option('opc_all_bookings', $bookings);
@@ -445,6 +462,33 @@ function opc_v5_render_admin_dashboard_safe()
                 update_option('opc_booking_history', $history);
 
                 $message = '<div class="notice notice-success"><p>✅ Successfully rescheduled appointment!</p></div>';
+            }
+        }
+    }
+
+    // Handle Admin Complete Appointment
+    if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'admin_complete') {
+        $complete_id = sanitize_text_field($_POST['complete_id'] ?? '');
+
+        if (!empty($complete_id)) {
+            $all_bookings = get_option('opc_all_bookings', array());
+            if (isset($all_bookings[$complete_id])) {
+                $phone = $all_bookings[$complete_id]['phone'];
+
+                // Update all_bookings array
+                $all_bookings[$complete_id]['status'] = 'completed';
+                update_option('opc_all_bookings', $all_bookings);
+
+                // Update in history array as well
+                $history = get_option('opc_booking_history', array());
+                foreach ($history as $key => $h) {
+                    if (($h['phone'] ?? '') === $phone) {
+                        $history[$key]['status'] = 'completed';
+                    }
+                }
+                update_option('opc_booking_history', $history);
+
+                $message = '<div class="notice notice-success"><p>✅ Successfully marked appointment as Completed!</p></div>';
             }
         }
     }
@@ -815,23 +859,46 @@ function opc_v5_render_admin_dashboard_safe()
                                             <td style="vertical-align:middle; font-weight:bold;">
                                                 <?php echo esc_html($b['date']); ?><br><span
                                                     style="color:#ea580c;"><?php echo esc_html($b['time']); ?></span>
+                                                <?php if (!empty($b['payment_method'])): ?>
+                                                    <br><span
+                                                        style="font-size:11px; background:#f3f4f6; color:#4b5563; padding:2px 5px; border-radius:3px; display:inline-block; margin-top:4px;">
+                                                        Payment: <?php echo esc_html(ucfirst($b['payment_method'])); ?>
+                                                        (<?php echo esc_html(ucfirst($b['payment_status'] ?? 'pending')); ?>)
+                                                    </span>
+                                                <?php endif; ?>
                                             </td>
                                             <?php if ($show_actions): ?>
                                                 <td>
-                                                    <form method="POST"
-                                                        style="display:flex; flex-direction:column; gap:8px; align-items:flex-start;">
-                                                        <input type="hidden" name="opc_action" value="admin_reschedule"><input type="hidden"
-                                                            name="resch_id" value="<?php echo esc_attr($b['id'] ?? $key); ?>">
-                                                        <div style="display:flex; gap:5px;"><input type="date" name="resch_date" required
-                                                                style="padding:4px; width:130px;" min="<?php echo date('Y-m-d'); ?>"><select
-                                                                name="resch_time" required style="padding:4px; width:100px;">
-                                                                <option value="">Time...</option>
-                                                                <?php foreach ($times as $t)
-                                                                    echo "<option value='$t'>$t</option>"; ?>
-                                                            </select></div>
-                                                        <button type="submit" class="button button-primary" style="width: 100%;">Reschedule
-                                                            Slot</button>
-                                                    </form>
+                                                    <div style="display:flex; flex-direction:column; gap:8px;">
+                                                        <form method="POST"
+                                                            style="display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin:0;">
+                                                            <input type="hidden" name="opc_action" value="admin_reschedule"><input
+                                                                type="hidden" name="resch_id"
+                                                                value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                            <div style="display:flex; gap:5px;"><input type="date" name="resch_date"
+                                                                    required style="padding:4px; width:130px;"
+                                                                    min="<?php echo date('Y-m-d'); ?>"><select name="resch_time" required
+                                                                    style="padding:4px; width:100px;">
+                                                                    <option value="">Time...</option>
+                                                                    <?php foreach ($times as $t)
+                                                                        echo "<option value='$t'>$t</option>"; ?>
+                                                                </select></div>
+                                                            <button type="submit" class="button button-primary"
+                                                                style="width: 100%;">Reschedule
+                                                                Slot</button>
+                                                        </form>
+                                                        <?php if (($b['status'] ?? 'active') !== 'completed'): ?>
+                                                            <form method="POST" style="margin:0;"
+                                                                onsubmit="return confirm('Mark this appointment as Completed?');">
+                                                                <input type="hidden" name="opc_action" value="admin_complete">
+                                                                <input type="hidden" name="complete_id"
+                                                                    value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                                <button type="submit" class="button"
+                                                                    style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
+                                                                    Mark Completed</button>
+                                                            </form>
+                                                        <?php endif; ?>
+                                                    </div>
                                                 </td>
                                             <?php endif; ?>
                                         </tr>
@@ -868,7 +935,8 @@ function opc_v5_render_admin_dashboard_safe()
 
             <?php render_bookings_table("✅ Active Appointments", "These are the regular appointments requested by customers.", $active_bookings, $times); ?>
             <?php render_bookings_table("🔄 Rescheduled Appointments", "These appointments have already been rescheduled.", $rescheduled_bookings, $times); ?>
-            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times); ?>
+                <?php render_bookings_table("🌟 Completed Appointments", "These appointments have been marked as completed.", $completed_bookings, $times, false); ?>
+            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times, false); ?>
 
             <!-- DANGER ZONE -->
             <div
