@@ -579,8 +579,17 @@
         body: JSON.stringify(data)
       })
         .then(res => res.json())
-        .then(() => handlePayment(payment, amount, description))
-        .catch(() => handlePayment(payment, amount, description))
+        .then(response => {
+          if (response.success) {
+            handlePayment(payment, amount, description);
+          } else {
+            alert("❌ Booking Failed: " + (response.data || "Unknown server error."));
+          }
+        })
+        .catch(error => {
+          console.error("Booking Error:", error);
+          alert("❌ Booking Failed: Network or server error. Please try again.");
+        })
         .finally(() => {
           btn.disabled = false;
           btn.innerText = origText;

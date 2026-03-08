@@ -10,9 +10,6 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
 // ─────────────────────────────────────────────────────────────
 // 0. DEFAULT PRICING STRUCTURE
 // ─────────────────────────────────────────────────────────────
@@ -89,9 +86,13 @@ function opc_v5_custom_booking_handler()
 
         // Prevent Duplicate Bookings
         $existing_bookings = get_option('opc_all_bookings', array());
+        if (!is_array($existing_bookings)) {
+            $existing_bookings = array();
+        }
+
         if (!empty($existing_bookings)) {
             foreach ($existing_bookings as $eb) {
-                if (($eb['date'] ?? '') === $date && ($eb['time'] ?? '') === $time && strtolower(trim($eb['email'] ?? '')) === strtolower(trim($user))) {
+                if (is_array($eb) && ($eb['date'] ?? '') === $date && ($eb['time'] ?? '') === $time && strtolower(trim($eb['email'] ?? '')) === strtolower(trim($user))) {
                     if (($eb['status'] ?? 'active') !== 'cancelled') {
                         throw new Exception('You already have an active appointment scheduled for this date and time.');
                     }
@@ -935,7 +936,7 @@ function opc_v5_render_admin_dashboard_safe()
 
             <?php render_bookings_table("✅ Active Appointments", "These are the regular appointments requested by customers.", $active_bookings, $times); ?>
             <?php render_bookings_table("🔄 Rescheduled Appointments", "These appointments have already been rescheduled.", $rescheduled_bookings, $times); ?>
-                <?php render_bookings_table("🌟 Completed Appointments", "These appointments have been marked as completed.", $completed_bookings, $times, false); ?>
+            <?php render_bookings_table("🌟 Completed Appointments", "These appointments have been marked as completed.", $completed_bookings, $times, false); ?>
             <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times, false); ?>
 
             <!-- DANGER ZONE -->
