@@ -202,8 +202,9 @@ function opc_v5_fetch_booking_renamed()
     $all_bookings = get_option('opc_all_bookings', array());
 
     $found = null;
-    foreach ($all_bookings as $b) {
-        if (($b['phone'] ?? '') === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
+    foreach ($all_bookings as $key => $b) {
+        $b_phone = $b['phone'] ?? $key;
+        if ($b_phone === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
             if (!$found || strtotime($b['date'] . ' ' . $b['time']) > strtotime($found['date'] . ' ' . $found['time'])) {
                 $found = $b;
             }
@@ -236,7 +237,8 @@ function opc_v5_reschedule_booking_renamed()
     $booking_id_to_edit = null;
 
     foreach ($all_bookings as $key => $b) {
-        if (($b['phone'] ?? '') === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
+        $b_phone = $b['phone'] ?? $key;
+        if ($b_phone === $phone && in_array($b['status'] ?? 'active', ['active', 'rescheduled'])) {
             $booking_id_to_edit = $key;
             break;
         }
@@ -474,7 +476,7 @@ function opc_v5_render_admin_dashboard_safe()
         if (!empty($complete_id)) {
             $all_bookings = get_option('opc_all_bookings', array());
             if (isset($all_bookings[$complete_id])) {
-                $phone = $all_bookings[$complete_id]['phone'];
+                $phone = $all_bookings[$complete_id]['phone'] ?? $complete_id;
 
                 // Update all_bookings array
                 $all_bookings[$complete_id]['status'] = 'completed';
@@ -483,10 +485,10 @@ function opc_v5_render_admin_dashboard_safe()
 
                 // Update in history array as well
                 $history = get_option('opc_booking_history', array());
-                foreach ($history as $key => $h) {
-                    if (($h['phone'] ?? '') === $phone) {
-                        $history[$key]['status'] = 'completed';
-                        $history[$key]['payment_status'] = 'completed';
+                foreach ($history as $key => &$h) {
+                    if ((isset($h['id']) && $h['id'] === $complete_id) || (($h['phone'] ?? '') === $phone && $phone !== $complete_id)) {
+                        $h['status'] = 'completed';
+                        $h['payment_status'] = 'completed';
                     }
                 }
                 update_option('opc_booking_history', $history);
@@ -503,7 +505,7 @@ function opc_v5_render_admin_dashboard_safe()
         if (!empty($refund_id)) {
             $all_bookings = get_option('opc_all_bookings', array());
             if (isset($all_bookings[$refund_id])) {
-                $phone = $all_bookings[$refund_id]['phone'];
+                $phone = $all_bookings[$refund_id]['phone'] ?? $refund_id;
 
                 // Update all_bookings array
                 $all_bookings[$refund_id]['payment_status'] = 'refunded';
@@ -511,9 +513,9 @@ function opc_v5_render_admin_dashboard_safe()
 
                 // Update in history array as well
                 $history = get_option('opc_booking_history', array());
-                foreach ($history as $key => $h) {
-                    if (($h['phone'] ?? '') === $phone) {
-                        $history[$key]['payment_status'] = 'refunded';
+                foreach ($history as $key => &$h) {
+                    if ((isset($h['id']) && $h['id'] === $refund_id) || (($h['phone'] ?? '') === $phone && $phone !== $refund_id)) {
+                        $h['payment_status'] = 'refunded';
                     }
                 }
                 update_option('opc_booking_history', $history);
