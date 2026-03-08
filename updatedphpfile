@@ -501,22 +501,33 @@ function opc_v5_render_admin_dashboard_safe()
     $completed_bookings = array();
 
     $today_str = wp_date('Y-m-d');
-    if (!empty($all_bookings) && is_array($all_bookings)) {
-        foreach ($all_bookings as $key => $b) {
-            $status = $b['status'] ?? 'active';
 
-            if (($b['date'] ?? '') === $today_str && $status !== 'cancelled') {
-                $today_bookings[$key] = $b;
+    // Filter by requested date if provided by admin
+    $filter_date = isset($_POST['view_date']) ? sanitize_text_field($_POST['view_date']) : '';
+
+    if (!empty($all_bookings) && is_array($all_bookings)) {
+        foreach ($all_bookings as $phone => $b) {
+            $status = $b['status'] ?? 'active';
+            $b_date = $b['date'] ?? '';
+
+            if (!empty($filter_date)) {
+                if ($b_date === $filter_date && $status !== 'cancelled') {
+                    $today_bookings[$phone] = $b;
+                }
+            } else {
+                if ($b_date === $today_str && $status !== 'cancelled') {
+                    $today_bookings[$phone] = $b;
+                }
             }
 
             if ($status === 'rescheduled') {
-                $rescheduled_bookings[$key] = $b;
+                $rescheduled_bookings[$phone] = $b;
             } elseif ($status === 'cancelled') {
-                $cancelled_bookings[$key] = $b;
+                $cancelled_bookings[$phone] = $b;
             } elseif ($status === 'completed') {
-                $completed_bookings[$key] = $b;
+                $completed_bookings[$phone] = $b;
             } elseif ($status === 'active') {
-                $active_bookings[$key] = $b;
+                $active_bookings[$phone] = $b;
             }
         }
     }
@@ -652,7 +663,8 @@ function opc_v5_render_admin_dashboard_safe()
                                                 <td class="inv-name" style="vertical-align:middle;">
                                                     <strong><?php echo esc_html($product->get_name()); ?></strong><br><span
                                                         style="color:#666; font-size:11px;">Current: <?php echo $stock; ?> stock |
-                                                        ₹<?php echo esc_html($price); ?></span></td>
+                                                        ₹<?php echo esc_html($price); ?></span>
+                                                </td>
                                                 <td style="vertical-align:middle;">
                                                     <input type="number" class="inv-field inv-qty"
                                                         name="bulk_inventory[<?php echo $pid; ?>][qty]" value="<?php echo $stock; ?>"
@@ -802,7 +814,8 @@ function opc_v5_render_admin_dashboard_safe()
                                             </td>
                                             <td style="vertical-align:middle; font-weight:bold;">
                                                 <?php echo esc_html($b['date']); ?><br><span
-                                                    style="color:#ea580c;"><?php echo esc_html($b['time']); ?></span></td>
+                                                    style="color:#ea580c;"><?php echo esc_html($b['time']); ?></span>
+                                            </td>
                                             <?php if ($show_actions): ?>
                                                 <td>
                                                     <form method="POST"
@@ -833,10 +846,29 @@ function opc_v5_render_admin_dashboard_safe()
             ?>
 
             <!-- TABLES -->
-            <?php render_bookings_table("📅 Today's Appointments", "Appointments scheduled for today (" . esc_html(wp_date('Y-m-d')) . ").", $today_bookings, $times, true); ?>
+            <div
+                style="flex:100%; min-width:100%; margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+                <h2 style="margin:0;">📅 Appointments View</h2>
+                <form method="POST" style="display:flex; gap:10px;">
+                    <input type="date" name="view_date" value="<?php echo esc_attr($filter_date ?: $today_str); ?>"
+                        style="padding:8px; border-radius:4px; border:1px solid #ccc;">
+                    <button type="submit" class="button button-primary"
+                        style="background:#ea580c; border-color:#ea580c;">Filter Date</button>
+                    <?php if (!empty($filter_date)): ?>
+                        <a href="?page=opc-admin-dashboard" class="button">Clear</a>
+                    <?php endif; ?>
+                </form>
+            </div>
+
+            <?php
+            $view_title = empty($filter_date) ? "🎯 Today's Appointments" : "📅 Appointments for " . esc_html($filter_date);
+            $view_desc = "Showing appointments scheduled for the selected date.";
+            render_bookings_table($view_title, $view_desc, $today_bookings, $times);
+            ?>
+
             <?php render_bookings_table("✅ Active Appointments", "These are the regular appointments requested by customers.", $active_bookings, $times); ?>
             <?php render_bookings_table("🔄 Rescheduled Appointments", "These appointments have already been rescheduled.", $rescheduled_bookings, $times); ?>
-                <?php render_bookings_table("🚫 Cancelled Appointments", "These appointments were cancelled by the customer.", $cancelled_bookings, $times, false); ?>
+            <?php render_bookings_table("❌ Cancelled Appointments", "These appointments were cancelled.", $cancelled_bookings, $times); ?>
 
             <!-- DANGER ZONE -->
             <div
