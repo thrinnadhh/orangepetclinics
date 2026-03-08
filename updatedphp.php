@@ -1048,6 +1048,49 @@ function opc_services_endpoint_content()
     if (!$current_user->exists())
         return;
 
+    // Handle Frontend Cancellation
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['opc_frontend_action']) && $_POST['opc_frontend_action'] === 'cancel_appointment') {
+        $cancel_id = sanitize_text_field($_POST['cancel_id'] ?? '');
+        if (!empty($cancel_id)) {
+            $updated = false;
+
+            // Cancel in legacy/active bookings
+            $all_bookings = get_option('opc_all_bookings', array());
+            if (isset($all_bookings[$cancel_id])) {
+                $all_bookings[$cancel_id]['status'] = 'cancelled';
+                update_option('opc_all_bookings', $all_bookings);
+                $updated = true;
+            } else {
+                // Fallback for older arrays that used phone keys
+                foreach ($all_bookings as $key => &$b) {
+                    if (($b['id'] ?? $key) === $cancel_id) {
+                        $b['status'] = 'cancelled';
+                        update_option('opc_all_bookings', $all_bookings);
+                        $updated = true;
+                        break;
+                    }
+                }
+            }
+
+            // Cancel in history
+            $history = get_option('opc_booking_history', array());
+            if (!empty($history)) {
+                foreach ($history as &$h) {
+                    if (($h['id'] ?? '') === $cancel_id) {
+                        $h['status'] = 'cancelled';
+                        update_option('opc_booking_history', $history);
+                        $updated = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($updated) {
+                echo '<div class="woocommerce-message" style="background:#d1fae5; color:#065f46; border-color:#34d399;">Appointment cancelled successfully.</div>';
+            }
+        }
+    }
+
     // Fetch user details to link their historical appointments
     $user_email = $current_user->user_email;
     $wc_phone = get_user_meta($current_user->ID, 'billing_phone', true);
@@ -1143,8 +1186,30 @@ function opc_services_endpoint_content()
             $status = $booking['status'] ?? 'active';
             if ($status === 'rescheduled') {
                 echo '<mark class="order-status status-on-hold" style="background:#fff3cd; color:#856404; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Rescheduled</span></mark>';
+            } elseif ($status === 'cancelled') {
+                echo '<mark class="order-status status-cancelled" style="background:#fef2f2; color:#991b1b; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Cancelled</span></mark>';
+            } elseif ($status === 'completed') {
+                echo '<mark class="order-status status-completed" style="background:#f0fdf4; color:#166534; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Completed</span></mark>';
             } else {
                 echo '<mark class="order-status status-processing" style="background:#d1fae5; color:#065f46; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Active</span></mark>';
+            }
+            echo '</td>';
+
+            // Actions
+            echo '<td class="woocommerce-orders-table__cell" data-title="Actions">';
+            if (in_array($status, ['active', 'rescheduled'])) {
+                $booking_id = esc_attr($booking['id'] ?? '');
+                if (!empty($booking_id)) {
+                    echo '<form method="POST" onsubmit="return confirm(\'Are you sure you want to cancel this appointment?\');" style="margin:0;">';
+                    echo '<input type="hidden" name="opc_frontend_action" value="cancel_appointment">';
+                    echo '<input type="hidden" name="cancel_id" value="' . $booking_id . '">';
+                    echo '<button type="submit" class="button" style="background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; padding:5px 10px; font-size:12px; border-radius:4px; cursor:pointer;">Cancel</button>';
+                    echo '</form>';
+                } else {
+                    echo '<span style="color:#999;font-size:12px;">N/A (Legacy)</span>';
+                }
+            } else {
+                echo '<span style="color:#999;font-size:12px;">-</span>';
             }
             echo '</td>';
 
