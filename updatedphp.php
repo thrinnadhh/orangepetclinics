@@ -478,6 +478,7 @@ function opc_v5_render_admin_dashboard_safe()
 
                 // Update all_bookings array
                 $all_bookings[$complete_id]['status'] = 'completed';
+                $all_bookings[$complete_id]['payment_status'] = 'completed';
                 update_option('opc_all_bookings', $all_bookings);
 
                 // Update in history array as well
@@ -485,6 +486,7 @@ function opc_v5_render_admin_dashboard_safe()
                 foreach ($history as $key => $h) {
                     if (($h['phone'] ?? '') === $phone) {
                         $history[$key]['status'] = 'completed';
+                        $history[$key]['payment_status'] = 'completed';
                     }
                 }
                 update_option('opc_booking_history', $history);
