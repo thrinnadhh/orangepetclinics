@@ -604,8 +604,14 @@ function opc_v5_render_admin_dashboard_safe()
                     }
                 }
 
+                $current_user = wp_get_current_user();
+                $admin_name = !empty($current_user->user_email) ? $current_user->user_email : 'Admin';
+                $refund_id_text = esc_html($data['id'] ?? 'Unknown');
+
                 // Update all_bookings array
                 $all_bookings[$refund_id]['payment_status'] = 'refunded';
+                $all_bookings[$refund_id]['razorpay_refund_id'] = $refund_id_text;
+                $all_bookings[$refund_id]['refunded_by'] = $admin_name;
                 update_option('opc_all_bookings', $all_bookings);
 
                 // Update in history array as well
@@ -613,11 +619,12 @@ function opc_v5_render_admin_dashboard_safe()
                 foreach ($history as $key => &$h) {
                     if ((isset($h['id']) && $h['id'] === $refund_id) || (($h['phone'] ?? '') === $phone && $phone !== $refund_id)) {
                         $h['payment_status'] = 'refunded';
+                        $h['razorpay_refund_id'] = $refund_id_text;
+                        $h['refunded_by'] = $admin_name;
                     }
                 }
                 update_option('opc_booking_history', $history);
 
-                $refund_id_text = esc_html($data['id'] ?? 'Unknown');
                 $message = '<div class="notice notice-success"><p>✅ Successfully registered Refund via Razorpay API! <b>(Refund ID: ' . $refund_id_text . ')</b><br><small>Note: Normal refunds take 5-7 business days to reflect in the customer\'s bank account.</small></p></div>';
                 end_refund:
                 ;
@@ -998,11 +1005,20 @@ function opc_v5_render_admin_dashboard_safe()
                                                 <?php echo esc_html($b['date']); ?><br><span
                                                     style="color:#ea580c;"><?php echo esc_html($b['time']); ?></span>
                                                 <?php if (!empty($b['payment_method'])): ?>
-                                                    <br><span
-                                                        style="font-size:11px; background:#f3f4f6; color:#4b5563; padding:2px 5px; border-radius:3px; display:inline-block; margin-top:4px;">
-                                                        Payment: <?php echo esc_html(ucfirst($b['payment_method'])); ?>
+                                                    <br><div
+                                                        style="font-size:11px; background:#f3f4f6; color:#4b5563; padding:5px; border-radius:3px; display:inline-block; margin-top:4px;">
+                                                        <strong>Payment:</strong> <?php echo esc_html(ucfirst($b['payment_method'])); ?>
                                                         (<?php echo esc_html(ucfirst($b['payment_status'] ?? 'pending')); ?>)
-                                                    </span>
+                                                        <?php if (!empty($b['razorpay_payment_id'])): ?>
+                                                            <br><span style="color:#6b7280;">Txn: <?php echo esc_html($b['razorpay_payment_id']); ?></span>
+                                                        <?php endif; ?>
+                                                        <?php if (!empty($b['razorpay_refund_id'])): ?>
+                                                            <br><span style="color:#059669;">Refund ID: <?php echo esc_html($b['razorpay_refund_id']); ?></span>
+                                                        <?php endif; ?>
+                                                        <?php if (!empty($b['refunded_by'])): ?>
+                                                            <br><span style="color:#6b7280;">Refunded by: <?php echo esc_html($b['refunded_by']); ?></span>
+                                                        <?php endif; ?>
+                                                    </div>
                                                 <?php endif; ?>
                                             </td>
                                             <?php if ($show_actions): ?>
