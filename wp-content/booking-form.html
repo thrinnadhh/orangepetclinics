@@ -581,7 +581,7 @@
         .then(res => res.json())
         .then(response => {
           if (response.success) {
-            handlePayment(payment, amount, description, response.data.booking_id);
+            handlePayment(payment, amount, description, response.data.booking_id, response.data.razorpay_key);
           } else {
             alert("❌ Booking Failed: " + (response.data || "Unknown server error."));
           }
@@ -596,10 +596,10 @@
         });
     });
 
-    function handlePayment(payment, amount, description, bookingId) {
+    function handlePayment(payment, amount, description, bookingId, razorpayKey) {
       if (payment === "online") {
         new Razorpay({
-          key: '<?php echo esc_js(get_option("opc_razorpay_key_id", "rzp_live_SNY9C0XOxmEpGi")); ?>',
+          key: razorpayKey || 'rzp_live_SNY9C0XOxmEpGi',
           amount: amount * 100,
           currency: "INR",
           name: "Orange Pet Clinic",

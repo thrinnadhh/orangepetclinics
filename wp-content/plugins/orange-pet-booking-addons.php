@@ -160,7 +160,8 @@ function opc_v5_custom_booking_handler()
 
         wp_send_json_success(array(
             "message" => "Booking saved!",
-            "booking_id" => $booking_id
+            "booking_id" => $booking_id,
+            "razorpay_key" => get_option('opc_razorpay_key_id', 'rzp_live_SNY9C0XOxmEpGi')
         ));
     } catch (Exception $e) {
         wp_send_json_error($e->getMessage());
@@ -529,6 +530,33 @@ function opc_v5_render_admin_dashboard_safe()
                 update_option('opc_booking_history', $history);
 
                 $message = '<div class="notice notice-success"><p>✅ Successfully marked appointment as Completed!</p></div>';
+            }
+        }
+    }
+
+    // Handle Admin Cancel Appointment
+    if ($_POST && isset($_POST['opc_action']) && $_POST['opc_action'] === 'admin_cancel') {
+        $cancel_id = sanitize_text_field($_POST['cancel_id'] ?? '');
+
+        if (!empty($cancel_id)) {
+            $all_bookings = get_option('opc_all_bookings', array());
+            if (isset($all_bookings[$cancel_id])) {
+                $phone = $all_bookings[$cancel_id]['phone'] ?? $cancel_id;
+
+                // Update all_bookings array
+                $all_bookings[$cancel_id]['status'] = 'cancelled';
+                update_option('opc_all_bookings', $all_bookings);
+
+                // Update in history array as well
+                $history = get_option('opc_booking_history', array());
+                foreach ($history as $key => &$h) {
+                    if ((isset($h['id']) && $h['id'] === $cancel_id) || (($h['phone'] ?? '') === $phone && $phone !== $cancel_id)) {
+                        $h['status'] = 'cancelled';
+                    }
+                }
+                update_option('opc_booking_history', $history);
+
+                $message = '<div class="notice notice-warning"><p>🚫 Successfully cancelled appointment.</p></div>';
             }
         }
     }
@@ -1002,6 +1030,15 @@ function opc_v5_render_admin_dashboard_safe()
                                                                     <button type="submit" class="button"
                                                                         style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
                                                                         Mark Completed</button>
+                                                                </form>
+                                                                <form method="POST" style="margin:0;"
+                                                                    onsubmit="return confirm('Cancel this appointment?');">
+                                                                    <input type="hidden" name="opc_action" value="admin_cancel">
+                                                                    <input type="hidden" name="cancel_id"
+                                                                        value="<?php echo esc_attr($b['id'] ?? $key); ?>">
+                                                                    <button type="submit" class="button"
+                                                                        style="width: 100%; background:#fee2e2; color:#991b1b; border-color:#f87171;">🚫
+                                                                        Cancel Appointment</button>
                                                                 </form>
                                                             <?php endif; ?>
                                                         <?php endif; ?>
