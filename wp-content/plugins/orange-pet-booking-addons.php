@@ -146,7 +146,7 @@ function opc_v5_custom_booking_handler()
                 'doctor' => $doctor,
                 'payment_method' => $payment_method,
                 'amount' => $amount,
-                'payment_status' => ($payment_method === 'online') ? 'completed' : 'pending' // Defaults for now
+                'payment_status' => 'pending' // Starts pending, online updates via JS sync
             );
             $bookings[$booking_id] = $booking_data;
             update_option('opc_all_bookings', $bookings);
@@ -184,6 +184,7 @@ function opc_v5_update_payment_id()
     $all_bookings = get_option('opc_all_bookings', array());
     if (isset($all_bookings[$booking_id])) {
         $all_bookings[$booking_id]['razorpay_payment_id'] = $payment_id;
+        $all_bookings[$booking_id]['payment_status'] = 'completed';
         update_option('opc_all_bookings', $all_bookings);
     }
 
@@ -191,6 +192,7 @@ function opc_v5_update_payment_id()
     foreach ($history as $key => &$h) {
         if (isset($h['id']) && $h['id'] === $booking_id) {
             $h['razorpay_payment_id'] = $payment_id;
+            $h['payment_status'] = 'completed';
             break;
         }
     }
@@ -1031,15 +1033,6 @@ function opc_v5_render_admin_dashboard_safe()
                                                                         style="width: 100%; background:#d1fae5; color:#065f46; border-color:#34d399;">✅
                                                                         Mark Completed</button>
                                                                 </form>
-                                                                <form method="POST" style="margin:0;"
-                                                                    onsubmit="return confirm('Cancel this appointment?');">
-                                                                    <input type="hidden" name="opc_action" value="admin_cancel">
-                                                                    <input type="hidden" name="cancel_id"
-                                                                        value="<?php echo esc_attr($b['id'] ?? $key); ?>">
-                                                                    <button type="submit" class="button"
-                                                                        style="width: 100%; background:#fee2e2; color:#991b1b; border-color:#f87171;">🚫
-                                                                        Cancel Appointment</button>
-                                                                </form>
                                                             <?php endif; ?>
                                                         <?php endif; ?>
 
@@ -1437,10 +1430,16 @@ function opc_services_endpoint_content()
             // Status
             echo '<td class="woocommerce-orders-table__cell" data-title="Status">';
             $status = $booking['status'] ?? 'active';
+            $payment_status = $booking['payment_status'] ?? 'pending';
+
             if ($status === 'rescheduled') {
                 echo '<mark class="order-status status-on-hold" style="background:#fff3cd; color:#856404; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Rescheduled</span></mark>';
             } elseif ($status === 'cancelled') {
-                echo '<mark class="order-status status-cancelled" style="background:#fef2f2; color:#991b1b; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Cancelled</span></mark>';
+                if ($payment_status === 'refunded') {
+                    echo '<mark class="order-status status-cancelled" style="background:#e0e7ff; color:#3730a3; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Refunded</span></mark>';
+                } else {
+                    echo '<mark class="order-status status-cancelled" style="background:#fef2f2; color:#991b1b; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Cancelled</span></mark>';
+                }
             } elseif ($status === 'completed') {
                 echo '<mark class="order-status status-completed" style="background:#f0fdf4; color:#166534; padding:3px 8px; border-radius:4px; font-size:12px;"><span>Completed</span></mark>';
             } else {
