@@ -1,0 +1,30 @@
+# WordPress Core
+wp-admin/
+wp-includes/
+*.php
+!wp-config-sample.php
+
+# Ignore all plugins and themes by default
+wp-content/plugins/*
+wp-content/themes/*
+
+# Keep our custom project files!
+!wp-content/plugins/orange-pet-booking-addons.php
+!wp-content/plugins/orange-pet-booking-addons/
+!wp-content/booking-form.html
+
+# Additional WordPress generated directories
+wp-content/uploads/
+wp-content/upgrade/
+wp-content/cache/
+wp-content/backups/
+
+# Ignore sensitive configuration
+wp-config.php
+
+# OS and IDE generated files
+.DS_Store
+.idea/
+.vscode/
+*.log
+node_modules/
