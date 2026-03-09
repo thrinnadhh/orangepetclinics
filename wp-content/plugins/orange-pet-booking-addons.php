@@ -1038,13 +1038,13 @@ function opc_v5_render_admin_dashboard_safe()
 
                                                         <?php if (($b['status'] ?? 'active') === 'cancelled' && ($b['payment_method'] ?? '') === 'online' && ($b['payment_status'] ?? '') !== 'refunded'): ?>
                                                             <form method="POST" style="margin:0;"
-                                                                onsubmit="return confirm('Mark this online payment as Refunded?');">
+                                                                onsubmit="return confirm('Initiate a real Razorpay Refund for this appointment?');">
                                                                 <input type="hidden" name="opc_action" value="admin_refund">
                                                                 <input type="hidden" name="refund_id"
                                                                     value="<?php echo esc_attr($b['id'] ?? $key); ?>">
                                                                 <button type="submit" class="button"
                                                                     style="width: 100%; background:#fee2e2; color:#991b1b; border-color:#f87171;">💸
-                                                                    Mark Refunded</button>
+                                                                    Initiate Razorpay Refund</button>
                                                             </form>
                                                         <?php endif; ?>
                                                     </div>

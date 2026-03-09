@@ -28,3 +28,10 @@ wp-config.php
 .vscode/
 *.log
 node_modules/
+
+# Ignore local configs and markdown
+.gemini/
+license.txt
+readme.md
+wp-config-sample.php
+booking-form.html
