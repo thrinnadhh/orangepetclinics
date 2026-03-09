@@ -587,7 +587,9 @@ function opc_v5_render_admin_dashboard_safe()
                             'Authorization' => 'Basic ' . base64_encode($rp_key . ':' . $rp_secret),
                             'Content-Type' => 'application/json'
                         ),
-                        'body' => json_encode(array('amount' => $amount * 100)) // Amount in paise
+                        'body' => json_encode(array(
+                            'speed' => 'optimum' // Attempts Instant Refund, falls back to Normal
+                        ))
                     );
                     $response = wp_remote_post($url, $args);
                     if (is_wp_error($response)) {
@@ -615,7 +617,8 @@ function opc_v5_render_admin_dashboard_safe()
                 }
                 update_option('opc_booking_history', $history);
 
-                $message = '<div class="notice notice-success"><p>✅ Successfully marked payment as Refunded via API!</p></div>';
+                $refund_id_text = esc_html($data['id'] ?? 'Unknown');
+                $message = '<div class="notice notice-success"><p>✅ Successfully registered Refund via Razorpay API! <b>(Refund ID: ' . $refund_id_text . ')</b><br><small>Note: Normal refunds take 5-7 business days to reflect in the customer\'s bank account.</small></p></div>';
                 end_refund:
                 ;
             }
