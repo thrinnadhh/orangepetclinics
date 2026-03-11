@@ -425,24 +425,40 @@ function opc_v5_render_admin_dashboard_safe()
         if (isset($_POST['bulk_inventory']) && is_array($_POST['bulk_inventory'])) {
             $update_count = 0;
             foreach ($_POST['bulk_inventory'] as $pid => $data) {
+                // Support both simple and variations
                 $product = wc_get_product(intval($pid));
                 if ($product) {
                     $changed = false;
+                    
+                    // 1. Handle Stock
                     if (isset($data['qty']) && $data['qty'] !== '') {
-                        $qty = intval($data['qty']);
-                        $product->set_manage_stock(true);
-                        $product->set_stock_quantity($qty);
-                        $product->set_stock_status($qty > 0 ? 'instock' : 'outofstock');
-                        $changed = true;
-                    }
-                    if (isset($data['price']) && $data['price'] !== '') {
-                        $price = filter_var($data['price'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
-                        if ($price !== false) {
-                            $product->set_regular_price($price);
-                            $product->set_price($price);
+                        $new_qty = intval($data['qty']);
+                        $old_qty = $product->get_stock_quantity();
+                        
+                        if ($new_qty !== $old_qty) {
+                            $product->set_manage_stock(true);
+                            $product->set_stock_quantity($new_qty);
+                            // Auto-update status based on qty
+                            $product->set_stock_status($new_qty > 0 ? 'instock' : 'outofstock');
                             $changed = true;
                         }
                     }
+                    
+                    // 2. Handle Price (Use WC native formatting)
+                    if (isset($data['price']) && $data['price'] !== '') {
+                        $new_price = wc_format_decimal($data['price']);
+                        $old_price = wc_format_decimal($product->get_regular_price());
+                        
+                        if ($new_price !== $old_price) {
+                            $product->set_regular_price($new_price);
+                            // If it's a variation, we might need to sync the price
+                            if ($product->is_type('variation')) {
+                                $product->set_price($new_price);
+                            }
+                            $changed = true;
+                        }
+                    }
+                    
                     if ($changed) {
                         $product->save();
                         $update_count++;
@@ -450,9 +466,9 @@ function opc_v5_render_admin_dashboard_safe()
                 }
             }
             if ($update_count > 0) {
-                $message = '<div class="notice notice-success"><p>✅ Successfully updated ' . $update_count . ' products!</p></div>';
+                $message = '<div class="notice notice-success"><p>✅ Successfully updated ' . $update_count . ' product records!</p></div>';
             } else {
-                $message = '<div class="notice notice-info"><p>ℹ️ No products were changed.</p></div>';
+                $message = '<div class="notice notice-info"><p>ℹ️ No changes were detected.</p></div>';
             }
         }
     }
@@ -667,13 +683,14 @@ function opc_v5_render_admin_dashboard_safe()
         $message = '<div class="notice notice-success"><p>✅ Razorpay API Credentials Saved!</p></div>';
     }
 
-    // Get ALL WC Products Safely
     if ($wc_active) {
         try {
             $wc_products = wc_get_products(array(
-                'limit' => -1, // Get all products
+                'limit' => -1,
                 'status' => 'publish',
-                'stock_status' => array('instock', 'outofstock')
+                'type'   => array('simple', 'variation'), // Fetch variations too
+                'orderby' => 'name',
+                'order'   => 'ASC'
             ));
         } catch (Exception $e) {
             $wc_products = array();
@@ -846,11 +863,17 @@ function opc_v5_render_admin_dashboard_safe()
                                             $pid = $product->get_id();
                                             $stock = $product->get_stock_quantity() ?: 0;
                                             $price = $product->get_regular_price() !== '' ? $product->get_regular_price() : $product->get_price();
+                                            $p_name = $product->get_name();
+                                            $is_var = $product->is_type('variation');
                                             ?>
-                                            <tr class="inv-row" data-name="<?php echo strtolower(esc_attr($product->get_name())); ?>"
+                                            <tr class="inv-row" data-name="<?php echo strtolower(esc_attr($p_name)); ?>"
                                                 style="transition: background-color 0.2s;">
                                                 <td class="inv-name" style="vertical-align:middle;">
-                                                    <strong><?php echo esc_html($product->get_name()); ?></strong><br><span
+                                                    <strong><?php echo esc_html($p_name); ?></strong>
+                                                    <?php if ($is_var): ?>
+                                                        <span style="font-size:10px; background:#f1f5f9; color:#475569; padding:1px 4px; border-radius:3px; margin-left:5px;">VARIATION</span>
+                                                    <?php endif; ?>
+                                                    <br><span
                                                         style="color:#666; font-size:11px;">Current: <?php echo $stock; ?> stock |
                                                         ₹<?php echo esc_html($price); ?></span>
                                                 </td>
